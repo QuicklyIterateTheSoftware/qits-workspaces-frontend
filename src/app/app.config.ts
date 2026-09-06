@@ -1,12 +1,17 @@
 import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideHttpClient, withFetch } from '@angular/common/http';
 import { provideRouter } from '@angular/router';
-import { provideQitsNavigation, provideQitsProjects, provideQitsScope } from '@qits/ui-components';
+import {
+  provideQitsBuilds,
+  provideQitsNavigation,
+  provideQitsProjects,
+  provideQitsScope,
+} from '@qits/ui-components';
 
 import { routes } from './app.routes';
 
 /**
- * Six providers, in the order spa-home documents, and the third arrived with this application's
+ * Seven providers, in the order spa-home documents, and the third arrived with this application's
  * first page: this client makes requests.
  *
  * - `provideBrowserGlobalErrorListeners` funnels genuinely-global errors and unhandled rejections
@@ -32,6 +37,12 @@ import { routes } from './app.routes';
  * - `provideQitsScope('repository')` says how deep this application's own addresses go: a workspace
  *   belongs to one repository, so it serves `/<slug>/<group>/<repo>/…` beside its own bare paths
  *   and the picker navigates here rather than leaving for qits-projects.
+ * - `provideQitsBuilds` puts the pending-builds bolt beside that picker: a popover of what qits-ci
+ *   is building right now, from `GET /ci/api/runs/active`. Same-origin like the two reads above and
+ *   for the same reason — the edge routes `/ci` on every host — so it needs the `provideHttpClient`
+ *   too and carries no origin of its own. Providing it is what puts the bolt there; a host where
+ *   `/ci` is unreachable is a decision made here rather than a dead affordance in the chrome. It
+ *   asks nothing at all while the panel is closed, and polls only for as long as one is open.
  */
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -41,5 +52,6 @@ export const appConfig: ApplicationConfig = {
     provideQitsNavigation(),
     provideQitsProjects(),
     provideQitsScope('repository'),
+    provideQitsBuilds(),
   ],
 };
