@@ -9,7 +9,13 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { QITS_NAVIGATION, QITS_REPOSITORIES, QITS_SCOPE, QitsButton } from '@qits/ui-components';
+import {
+  QITS_NAVIGATION,
+  QITS_REPOSITORIES,
+  QITS_SCOPE,
+  QitsButton,
+  type QitsNavTree,
+} from '@qits/ui-components';
 import type { EditorSessionDto } from '../api/dto';
 import { WorkspacesApi } from '../api/workspaces-api';
 import { Async } from '../ui/async';
@@ -35,7 +41,7 @@ type Pending = 'stop' | 'recreate' | null;
  * The editor: a browser VS Code for this project, and the wait while it comes up.
  *
  * **The page is a door and a waiting room, and then it is gone.** The editor is
- * `openvscode-server` on its own origin — `https://editor.<slug>.<domain>/` — so the last thing
+ * `openvscode-server` on its own origin — `https://editor.<slug>.<env>.<domain>/` — so the last thing
  * this component does is a *full* navigation out of the application. It is not an iframe and not a
  * route: the editor owns a whole origin, with its own service worker, its own history and its own
  * websockets, and a frame around it would buy nothing and cost all three.
@@ -79,13 +85,11 @@ export class EditorPage {
   private readonly qitsRepositories = inject(QITS_REPOSITORIES);
   private readonly browser = inject(BROWSER_LOCATION);
   /**
-   * The platform's own statement of where the environment is served — the same navigation document
+   * The platform's own statement of this environment's authority — the same navigation document
    * every sidebar link is composed from. Optional because a bare spec of this component need not
    * stand the whole chrome up; a page without it simply keeps waiting for an address.
    */
   private readonly navigation = inject(QITS_NAVIGATION, { optional: true });
-
-  /** The host this page was served on, which is the only input the hand-off's address has. */
 
   protected readonly session = signal<Loadable<EditorSessionDto>>(IDLE);
   protected readonly pending = signal<Pending>(null);
@@ -121,8 +125,13 @@ export class EditorPage {
   /** Where the reader is being sent, or null while the platform has not stated its origin yet. */
   protected readonly editorUrl = computed(() => {
     const slug = this.projectSlug();
-    const origin = this.navigation?.tree()?.environmentOrigin;
-    return slug ? editorOrigin(origin, slug) : null;
+    // `projectOrigin` is read through a widening because the field is served by the edge today but
+    // is not on `QitsNavTree` in the released @qits/ui-components — the typed field lands with the
+    // next release, and this cast goes with it. Never a fabricated value: absent, the composition
+    // falls back to `environmentOrigin` inside `editorOrigin`.
+    const tree = this.navigation?.tree() as
+      (QitsNavTree & { readonly projectOrigin?: string }) | undefined;
+    return slug ? editorOrigin(tree?.projectOrigin, tree?.environmentOrigin, slug) : null;
   });
 
   /** Whether the address states a project at all. Unscoped, this page has no subject. */
@@ -249,7 +258,7 @@ export class EditorPage {
           this.handOff();
           return;
         }
-        // Ready, but the navigation document has not stated the environment origin yet — the
+        // Ready, but the navigation document has stated no origin to compose against yet — the
         // address is composed from it, so ask again shortly rather than stranding the reader.
         this.schedule(repositoryId);
         return;

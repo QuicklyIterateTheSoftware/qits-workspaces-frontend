@@ -11,6 +11,7 @@ import {
   type QitsScopeSource,
   QITS_NAVIGATION,
   type QitsNavigationSource,
+  type QitsNavTree,
 } from '@qits/ui-components';
 import type { EditorSessionDto } from '../api/dto';
 import { routes } from '../app.routes';
@@ -60,14 +61,23 @@ describe('EditorPage', () => {
     assign: (url: string) => void assigned.push(url),
   };
 
-  /** The navigation document, as the shell would hold it: the environment origin and nothing else. */
+  /**
+   * The navigation document, as the shell would hold it: the platform's origin statements and
+   * nothing else. Both are set and they differ, which is what makes the assertions below say which
+   * one the page composes against — `projectOrigin`, the one that always spells the environment
+   * label, because the editor is a four-label host.
+   *
+   * `projectOrigin` is cast in for the same reason the page widens it: the edge serves the field,
+   * the typed one lands with the next @qits/ui-components release.
+   */
   const navigationSource: QitsNavigationSource = {
     tree: signal({
       entries: [],
+      projectOrigin: 'https://dev.wohlben.eu',
       environmentOrigin: 'https://wohlben.eu',
       apiDocs: {},
       legacy: undefined,
-    }),
+    } as QitsNavTree),
     failed: signal(false),
   };
 
@@ -84,7 +94,7 @@ describe('EditorPage', () => {
           'qits-qits',
         ),
         { provide: BROWSER_LOCATION, useValue: browser },
-        // The platform's statement of where the environment is served — what the hand-off's
+        // The platform's statement of the environment's own authority — what the hand-off's
         // address is composed from, exactly as the sidebar composes every cross-app link.
         { provide: QITS_NAVIGATION, useValue: navigationSource },
         scope,
@@ -161,7 +171,7 @@ describe('EditorPage', () => {
 
     expect(assigned).toEqual([]);
     expect(text()).toContain('Starting the container');
-    expect(text()).toContain('https://editor.qits.wohlben.eu/');
+    expect(text()).toContain('https://editor.qits.dev.wohlben.eu/');
 
     vi.advanceTimersByTime(2_000);
     http.expectOne(ENSURE_URL).flush(session());
@@ -179,7 +189,7 @@ describe('EditorPage', () => {
     http.expectOne(ENSURE_URL).flush(session({ editorState: 'RUNNING', editorReady: true }));
     await settle();
 
-    expect(assigned).toEqual(['https://editor.qits.wohlben.eu/']);
+    expect(assigned).toEqual(['https://editor.qits.dev.wohlben.eu/']);
 
     // The poll is over: a ready editor is asked for nothing more.
     vi.advanceTimersByTime(10_000);

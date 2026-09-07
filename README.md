@@ -94,9 +94,9 @@ would be worse than an honest record, which is what the page shows instead.
 ## The editor
 
 `/editor` is a **waiting room, and then it is gone.** The editor is `openvscode-server` inside the
-project's workspace container, answering on its own origin — `https://editor.<slug>.<domain>/` — so
-the last thing the page does is a full `location.assign` out of the application. Not an iframe and
-not a route: the editor owns a whole origin, with its own service worker, history and websockets,
+project's workspace container, answering on its own origin — `https://editor.<slug>.<env>.<domain>/`
+— so the last thing the page does is a full `location.assign` out of the application. Not an iframe
+and not a route: the editor owns a whole origin, with its own service worker, history and websockets,
 and a frame around it would buy nothing and cost all three.
 
 **One idempotent door is the entire protocol.** `POST /workspaces/api/editor/ensure?repositoryId=…`
@@ -107,10 +107,16 @@ readiness from `editorState`: the service holds both the container status and th
 and `editorReady` is where that judgement lives. The states are what the wait _says_ while it is
 false, and `ENDED` is the one that stops the waiting rather than continuing it.
 
-**The origin is derived from this page's own host, never from configuration.** Every platform host
-is `<app>.<project>.<environment>.<domain>`, so dropping the first two labels leaves the environment
-domain the reader is already in, and `editor.<slug>` goes in front of it. A configured base would be
-a second statement of the same fact — one a `dev` deployment could hold pointing at production.
+**The origin is asked for, never derived.** The navigation document (`GET /main-navigation`) states
+this environment's authority, and the page puts `editor.<slug>.` in front of it — nothing else.
+Specifically `projectOrigin`, which always spells the environment label (`https://dev.wohlben.dev`)
+even where the environment is _served_ from the bare apex, because the editor is a four-label host on
+every environment. `environmentOrigin` is the fallback arm for an edge that predates the field, and it
+composes the short `editor.<slug>.<domain>` form that reached the editor only through the edge's
+default-environment fallthrough. Deriving from this page's own hostname is what shipped twice and was
+wrong twice — `editor-origin.ts` keeps the bug history, and the third entry is the environment label:
+which one belongs in the name, or whether one does, is the platform's statement and not a client's
+guess.
 
 **The scope is the project, and the row is always its wrapper.** A repository segment in the address
 says which page the reader came in through, not which editor this is: there is one editor per

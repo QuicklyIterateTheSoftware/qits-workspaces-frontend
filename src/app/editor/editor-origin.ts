@@ -26,40 +26,76 @@ export const BROWSER_LOCATION = new InjectionToken<BrowserLocation>('qits.browse
 });
 
 /**
- * Where a project's editor answers: `editor.<slug>.` in front of the ENVIRONMENT'S OWN ORIGIN, as
- * the platform states it.
+ * Where a project's editor answers: `editor.<slug>.` in front of AN ORIGIN THE PLATFORM STATES,
+ * and in front of nothing this page worked out for itself.
  *
- * **The environment origin comes from the edge's navigation document** (`/main-navigation`,
- * `origin` — `EnvironmentAuthority` on the edge side, rooted in the platform's configured domain),
- * which is the same statement every cross-application link in the sidebar is already composed
- * from. Scheme and port travel with it, so a plain-http local platform hands off to plain http.
+ * **Both origins come from the edge's navigation document** (`/main-navigation` —
+ * `EnvironmentAuthority` on the edge side, rooted in the platform's configured domain), the same
+ * statement every cross-application link in the sidebar is already composed from. Scheme and port
+ * travel with whichever is used, so a plain-http local platform hands off to plain http.
  *
- * This function has been wrong twice, both times by inventing the domain instead of asking for
- * it: it shipped deriving from `location.hostname` by dropping two labels (a
- * `<app>.<project>.<env>.<domain>` host shape no deployment serves — the first real click landed
- * on `https://editor.qits.eu/`, somebody else's domain), and the corrected label count was still
- * string surgery on this page's own address. The domain is configured — the bootstrap states it,
- * the certificate is ordered against it, the edge publishes it — and the navigation document is
- * where the platform says it to a browser. Ask; never derive.
+ * **`projectOrigin` is preferred, and it is the whole point of the pair.** The editor is a
+ * four-label host — `editor.<slug>.<env>.<domain>` — so the name it is composed against must carry
+ * the environment label. `origin`/`environmentOrigin` does not always: for the default environment
+ * it has historically been the bare apex, because that is where that environment is *served*.
+ * `projectOrigin` is the same environment's origin with the env label ALWAYS spelled out, which is
+ * exactly the name the edge routes an editor by. Given both, this composes against `projectOrigin`.
  *
- * `null` while the platform has not answered (the document not loaded yet, or `ng serve` with no
- * edge in front) and for an empty slug. The page keeps asking rather than guessing.
+ * `environmentOrigin` remains the fallback arm, reproducing what shipped before, for one case only:
+ * an older edge that serves no `projectOrigin` yet. It composes the three-label short form, which
+ * routed through the edge's default-environment fallthrough — so the arm stops being useful the day
+ * that fallthrough is removed, and it is here for the rollout window and not as a second answer.
+ *
+ * This function has been wrong three times, every time by deciding a piece of the name instead of
+ * asking for it:
+ *
+ * 1. It shipped deriving from `location.hostname` by dropping two labels — an
+ *    `<app>.<project>.<env>.<domain>` host shape no deployment serves. The first real click landed
+ *    on `https://editor.qits.eu/`, somebody else's domain.
+ * 2. The corrected label count was still string surgery on this page's own address, which is a
+ *    guess that happened to be right. The DOMAIN is configured — the bootstrap states it, the
+ *    certificate is ordered against it, the edge publishes it.
+ * 3. Then the ENVIRONMENT label, once the editor became four-label: whether an env label belongs in
+ *    the name — and which — is not this client's to decide either. A page served from the apex
+ *    cannot see the environment it is in, and no amount of reading `origin` reveals it. That is
+ *    what `projectOrigin` exists for: the server states the full authority, and this function only
+ *    ever puts `editor.<slug>.` in front of it.
+ *
+ * Ask; never derive. The prefix is the only thing composed here.
+ *
+ * `null` while the platform has stated neither (the document not loaded yet, or `ng serve` with no
+ * edge in front), for a statement that is not an origin, and for an empty slug. The page keeps
+ * asking rather than guessing.
  */
 export function editorOrigin(
+  projectOrigin: string | undefined,
   environmentOrigin: string | undefined,
   projectSlug: string,
 ): string | null {
-  if (!environmentOrigin || projectSlug === '') {
+  if (projectSlug === '') {
+    return null;
+  }
+  const stated = statedOrigin(projectOrigin) ?? statedOrigin(environmentOrigin);
+  if (!stated) {
+    return null;
+  }
+  return `${stated.protocol}//editor.${projectSlug}.${stated.host}/`;
+}
+
+/**
+ * One of the document's origin statements, parsed — or `null` for "the platform did not state
+ * this one", which is what an unparseable value is treated as too. A statement that is not an
+ * origin names no host to put a prefix in front of, so it is not a statement.
+ */
+function statedOrigin(stated: string | undefined): URL | null {
+  if (!stated) {
     return null;
   }
   let origin: URL;
   try {
-    origin = new URL(environmentOrigin);
+    origin = new URL(stated);
   } catch {
     return null;
   }
-  if (!origin.host) {
-    return null;
-  }
-  return `${origin.protocol}//editor.${projectSlug}.${origin.host}/`;
+  return origin.host ? origin : null;
 }
