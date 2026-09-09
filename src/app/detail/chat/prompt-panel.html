@@ -163,6 +163,12 @@
   <p class="problem" role="alert">⚠ {{ problem }}</p>
 }
 
+<!--
+  Not signed in is not an error line: it has a next step, and the step is a terminal. The Agents tab
+  is where this page draws a PTY, so opening it here is a launch and a jump.
+-->
+<app-sign-in-notice [workspaceRowId]="workspaceRowId()" (opened)="goToAgents()" />
+
 <p class="note deferred">
   The full agent TUI launches from the Agents tab, which is where a terminal session is rendered and
   resumed.

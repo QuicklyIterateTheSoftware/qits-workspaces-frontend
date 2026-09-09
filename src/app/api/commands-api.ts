@@ -40,6 +40,24 @@ export type AgentMcpScope = 'ACTIONS' | 'REPOSITORY';
 /** `CHAT` is the stream-json conversation over pipes; `INTERACTIVE` is the full agent TUI on a PTY. */
 export type AgentLaunchMode = 'CHAT' | 'INTERACTIVE';
 
+/**
+ * Where in the product a session was started from — **not** which MCP servers it is wired to.
+ *
+ * The two axes cross freely and neither substitutes for the other: {@link AgentMcpScope} is
+ * *addressing*, how narrow the server urls are, and the surface is *what the session is for*. The
+ * platform's vocabulary is eight keys wide and lives in the harness library; this application owns
+ * exactly the two below, which is why only those two are spelled here. A key this app never sends is
+ * not a key this app should be able to send by accident.
+ *
+ * **Sending it is the whole point, and it is why these two strings exist at all.** The workspace
+ * detail route's chat and agents tabs post a request that is byte-identical to the refining route's
+ * in qits-projects-frontend — same scope, same mode, same body — so the daemon serving both cannot
+ * tell an epic's chat from an ad-hoc workspace's, and neither can anything downstream. Until both
+ * frontends name their own surface, a configuration given to `epic.chat` is a configuration given to
+ * every `workspace.chat` on the platform as well.
+ */
+export type AgentSurface = 'workspace.chat' | 'workspace.agent';
+
 /** How a session entered a command's lineage. */
 export type AgentSessionSource = 'PINNED' | 'RESUMED' | 'FORKED' | 'SWITCHED' | 'REPORTED';
 
@@ -78,6 +96,21 @@ export interface CommandDto {
   readonly exitCode?: number;
   readonly commitHash?: string;
   readonly shortCommitHash?: string;
+
+  /**
+   * The surface the launch named, echoed back — `AgentSurface`'s key as a plain string.
+   *
+   * A string rather than {@link AgentSurface} on purpose: a command answered here may have been
+   * launched by *another* surface entirely (the two composed runs are nobody's button), so a union
+   * of the two keys this app sends would be a type that lies about what can arrive.
+   *
+   * **Absent for three different reasons**, none of them an error: a command that is not an agent,
+   * the sign-in terminal, and every agent command launched before the daemon learned to report it.
+   * Nothing on this page branches on it yet — it is declared because the field is on the wire and a
+   * reader should not have to rediscover it — but it is what a later change reads instead of
+   * matching a display name, which is the contract this epic exists to delete.
+   */
+  readonly agentSurface?: string;
   readonly agentSessions: readonly AgentSessionRefDto[];
 }
 
@@ -102,6 +135,18 @@ interface CommandListResponse {
  */
 export interface LaunchAgentRequest {
   readonly scope: AgentMcpScope;
+
+  /**
+   * Which surface asked, and **required rather than optional** so a later launch site cannot quietly
+   * omit it.
+   *
+   * The daemon resolves a missing surface to the one this request's *shape* implies — a workspace
+   * container's interactive launch reads as `workspace.agent`, its chat as `workspace.chat` — which
+   * is a migration crutch with an expiry, not a contract: it exists so the daemons could ship before
+   * the frontends, and the guess collapses `epic.chat` into `workspace.chat` precisely because the
+   * two requests are indistinguishable. Naming it here is what makes the guess removable.
+   */
+  readonly surface: AgentSurface;
   readonly mode: AgentLaunchMode;
   readonly agentType?: AgentType;
   readonly initialContext?: string;
@@ -242,6 +287,29 @@ export class CommandsApi {
   /** Launch a coding agent. The answer is the command to attach a socket to. */
   async launchAgent(workspaceRowId: number, request: LaunchAgentRequest): Promise<CommandDto> {
     const answer = await this.daemon.post<CommandEnvelope>(workspaceRowId, '/agents', request);
+    return answer.command;
+  }
+
+  /**
+   * Open the harness's sign-in terminal: the one-time OAuth an operator completes so every container
+   * on the shared credential volume is signed in.
+   *
+   * **A door, not a fallback, and a normal launch like any other.** It used to be what `POST /agents`
+   * *became* when nobody was signed in — the session you asked for was silently swapped for this
+   * REPL and the caller attached to it as though it were an agent. That substitution is gone from the
+   * harness library, which refuses instead; what is left is this, reached deliberately, by a caller
+   * that has told the user what it is opening.
+   *
+   * The answer is the same `{command: …}` envelope every other launch answers, and the command is an
+   * ordinary interactive `TERMINAL` — so it is attached, rendered and exited exactly like a session,
+   * with no special case anywhere but the sentence above it.
+   */
+  async launchSignIn(workspaceRowId: number, agentType?: AgentType): Promise<CommandDto> {
+    const answer = await this.daemon.post<CommandEnvelope>(
+      workspaceRowId,
+      '/agents/sign-in',
+      agentType ? { agentType } : {},
+    );
     return answer.command;
   }
 

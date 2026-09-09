@@ -11,6 +11,7 @@ import { WEB_SOCKET_FACTORY } from '../../api/web-socket';
 import { WorkspaceCommands } from '../../api/workspace-commands';
 import { WorkspaceDaemonApi } from '../../api/workspace-daemon-api';
 import { IDLE, LOADING, failed, ready, type Loadable } from '../../ui/loadable';
+import { AgentSignIn, isSignInTerminal } from './agent-sign-in';
 import { EMPTY_TERMINAL_FRAMES, TerminalSocket } from './terminal-socket';
 
 /**
@@ -26,30 +27,14 @@ export type SessionBranch =
   | { readonly kind: 'attached'; readonly commandId: string }
   /** 2 — a running chat owns the conversation, so this tab defers to it. */
   | { readonly kind: 'deferred'; readonly commandId: string }
-  /** The special case: the launch answered with a sign-in terminal instead of a session. */
+  /** The sign-in terminal somebody opened, rendered where a session would be. */
   | { readonly kind: 'signin'; readonly commandId: string }
   /** 4 — history exists and nothing is running, so nothing happens without a press. */
   | { readonly kind: 'idle' }
   | { readonly kind: 'unavailable'; readonly message: string };
 
-/** How many times a completed sign-in may replay the launch before the loop is called off. */
-const REPLAY_LIMIT = 2;
-
 /** The statuses that mean the container is not answering, as opposed to answering "no". */
 const UNREACHABLE: readonly number[] = [0, 502, 503, 504];
-
-/**
- * Whether a command is the sign-in terminal the launch paths hand back instead of a session.
- *
- * **Lineage alone is not enough, and that is a real trap.** The contract says a sign-in terminal is
- * recognisable because it has no session lineage — true, but a *fresh Kimi* launch also arrives with
- * none, because Kimi cannot pin a session id and the `SessionStart` hook reports it later. Treating
- * that as a sign-in would replay the launch on top of a perfectly good agent. So the name the daemon
- * gives the login command is checked as well, and both have to agree.
- */
-export function isSignInTerminal(command: CommandDto): boolean {
-  return command.agentSessions.length === 0 && /sign-in$/i.test(command.actionName.trim());
-}
 
 /**
  * The embedded agent session: what it resolves to, and the socket it is attached through.
@@ -72,13 +57,25 @@ export function isSignInTerminal(command: CommandDto): boolean {
  * of a session this container does not own. A finished run does not auto-relaunch either, because a
  * crashing agent would relaunch forever. Every resume here starts at a press.
  *
- * ## The sign-in terminal replays what it interrupted
+ * ## Every launch names its surface
  *
- * When the agent is not signed in, `POST /agents` answers a **login terminal** rather than a session.
- * It is a PTY like any other, so it renders in place; and when it exits, resolution re-runs *and the
- * launch the sign-in interrupted is issued again*, so completing the login continues what was
- * actually asked for rather than dropping the user back on a menu. The replay is capped, because a
- * sign-in that keeps failing must not become a launch loop.
+ * Start, resume and fork all send `surface: "workspace.agent"`, and it is one line of body with a
+ * reason worth the paragraph: this request is **byte-identical to the refining route's** in
+ * qits-projects-frontend — same scope, same mode, same everything — so the daemon serving both cannot
+ * tell an epic's agent tab from an ad-hoc workspace's. Until both frontends send their own key, a
+ * configuration given to `epic.agent` is given to every workspace agent on the platform as well.
+ *
+ * ## Not signed in is an answer, not a substitution
+ *
+ * A launch against a harness nobody has signed in is **refused**, and the refusal is held by {@link
+ * ./agent-sign-in#AgentSignIn} so the panel can say so and offer the sign-in terminal as a press. It
+ * used to be swapped instead: `POST /agents` answered a login terminal, this class held the launch it
+ * had interrupted, and re-issued it when the terminal exited. That machinery is gone with the swap it
+ * existed to paper over — a terminal opened on purpose is not an interruption to make good on, and a
+ * relaunch that meets the same wall is the launch loop the cap was there to stop.
+ *
+ * The terminal is still rendered here, because this is the page's one PTY: opening it produces an
+ * ordinary `TERMINAL` command, and {@link SessionBranch} carries it exactly as it carries a session.
  */
 @Injectable({ providedIn: 'root' })
 export class AgentSession {
@@ -88,6 +85,7 @@ export class AgentSession {
   private readonly daemon = inject(WorkspaceDaemonApi);
   private readonly openSocket = inject(WEB_SOCKET_FACTORY);
   private readonly document = inject(DOCUMENT);
+  private readonly signIn = inject(AgentSignIn);
 
   private readonly workspaceRowId = signal(0);
 
@@ -96,10 +94,6 @@ export class AgentSession {
 
   /** The command this page launched or resumed, which is attachable before any lineage is reported. */
   private readonly ownCommandId = signal<string | null>(null);
-
-  /** The sign-in terminal on screen, and the launch it interrupted. */
-  private readonly signIn = signal<{ commandId: string; replay: LaunchAgentRequest } | null>(null);
-  private replays = 0;
 
   private readonly inFlight = signal(false);
   private readonly problemText = signal<string | null>(null);
@@ -136,7 +130,7 @@ export class AgentSession {
 
   constructor() {
     effect(() => this.driveSocket(this.branch()));
-    effect(() => this.replayAfterSignIn());
+    effect(() => this.forgetFinishedSignIn());
     effect(() => this.autoLaunch());
   }
 
@@ -230,14 +224,16 @@ export class AgentSession {
       return { kind: 'resolving' };
     }
 
-    const signIn = this.signIn();
-    if (signIn) {
-      const command = this.commandList().find((entry) => entry.id === signIn.commandId);
+    // A sign-in terminal somebody opened outranks the resolution: it is what is on screen, and the
+    // session it stands in front of cannot start until it is done anyway.
+    const signInCommandId = this.signIn.visibleCommandId();
+    if (signInCommandId) {
+      const command = this.commandList().find((entry) => entry.id === signInCommandId);
       if (!command || command.status === 'RUNNING') {
-        return { kind: 'signin', commandId: signIn.commandId };
+        return { kind: 'signin', commandId: signInCommandId };
       }
-      // It has exited. The replay effect re-runs the launch; this is the moment in between.
-      return { kind: 'resolving' };
+      // It has exited. Nothing is replayed; the effect below drops it and this falls through to the
+      // ordinary resolution, which is the idle choice a fresh session starts from.
     }
 
     const run = this.agentRun();
@@ -276,9 +272,8 @@ export class AgentSession {
     this.detachSocket();
     this.workspaceRowId.set(workspaceRowId);
     this.ownCommandId.set(null);
-    this.signIn.set(null);
+    this.signIn.reset();
     this.problemText.set(null);
-    this.replays = 0;
     this.autoLaunchedFor = null;
     this.harnesses.set(null);
     this.sessionState.set(workspaceRowId > 0 ? LOADING : IDLE);
@@ -303,6 +298,7 @@ export class AgentSession {
   async startFresh(agentType?: AgentType): Promise<void> {
     await this.launch({
       scope: 'REPOSITORY',
+      surface: 'workspace.agent',
       mode: 'INTERACTIVE',
       ...(agentType ? { agentType } : {}),
     });
@@ -321,6 +317,7 @@ export class AgentSession {
     }
     await this.launch({
       scope: 'REPOSITORY',
+      surface: 'workspace.agent',
       mode: 'INTERACTIVE',
       resumeSessionId: sessionId,
       ...(fork ? { fork: true } : {}),
@@ -358,15 +355,21 @@ export class AgentSession {
     try {
       const command = await this.commandsApi.launchAgent(workspaceRowId, request);
       if (isSignInTerminal(command)) {
-        // Not a session: a login terminal. Hold what was asked for, and replay it when this exits.
-        this.signIn.set({ commandId: command.id, replay: request });
+        // Not a session: a login terminal, from a daemon that still substitutes one. It is *not*
+        // attached to — the notice goes up with the same words the refusal carries, and the terminal
+        // appears when somebody presses to open it.
+        this.signIn.adopt(command);
         this.ownCommandId.set(null);
       } else {
         this.ownCommandId.set(command.id);
       }
       await Promise.all([this.entry.refresh(), this.refreshSessions()]);
     } catch (error) {
-      this.problemText.set(describeLaunch(error));
+      // A refusal for want of a sign-in is the sign-in surface's, not an error line: it has a next
+      // step, and "⚠ nobody is signed in" with nothing to press would be the old silence in words.
+      if (!this.signIn.refuse(error)) {
+        this.problemText.set(describeLaunch(error));
+      }
     } finally {
       this.inFlight.set(false);
     }
@@ -386,7 +389,9 @@ export class AgentSession {
     if (workspaceRowId <= 0 || commands.kind !== 'ready' || sessions.kind !== 'ready') {
       return;
     }
-    if (this.hasHistory() || this.ownsConversation() || this.signIn() !== null) {
+    // Nothing is launched into a signed-out harness or over an open sign-in terminal: the first
+    // would be refused on every pass, and the second is the door being held for the launch anyway.
+    if (this.hasHistory() || this.ownsConversation() || this.signIn.showing()) {
       return;
     }
     if (this.autoLaunchedFor === workspaceRowId) {
@@ -396,28 +401,25 @@ export class AgentSession {
     untracked(() => void this.startFresh());
   }
 
-  /** The sign-in terminal exited: re-run resolution, and re-issue the launch it interrupted. */
-  private replayAfterSignIn(): void {
-    const signIn = this.signIn();
+  /**
+   * The sign-in terminal exited: let go of it, and of the refusal it was opened for.
+   *
+   * **And nothing else.** This is where the launch the terminal interrupted used to be re-issued,
+   * with a cap on how often, because the terminal had been conjured in place of that launch and the
+   * user was owed the session they actually asked for. A terminal opened on a press is not an
+   * interruption: the next session starts where every other one does, at the idle choice below.
+   */
+  private forgetFinishedSignIn(): void {
+    const signInCommandId = this.signIn.commandId();
     const commands = this.entry.commands();
-    if (!signIn || commands.kind !== 'ready') {
+    if (!signInCommandId || commands.kind !== 'ready') {
       return;
     }
-    const command = this.commandList().find((entry) => entry.id === signIn.commandId);
+    const command = this.commandList().find((entry) => entry.id === signInCommandId);
     if (!command || command.status === 'RUNNING') {
       return;
     }
-    untracked(() => {
-      this.signIn.set(null);
-      if (this.replays >= REPLAY_LIMIT) {
-        this.problemText.set(
-          'The sign-in terminal closed and the agent still is not signed in. Start a session again when it is.',
-        );
-        return;
-      }
-      this.replays += 1;
-      void this.launch(signIn.replay);
-    });
+    untracked(() => this.signIn.finished());
   }
 
   /**

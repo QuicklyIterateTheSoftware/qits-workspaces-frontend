@@ -1,9 +1,10 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { QitsButton } from '@qits/ui-components';
 import type { AgentType } from '../../api/commands-api';
 import { FileNavigation } from '../files/file-navigation';
 import { AgentSession } from './agent-session';
+import { SignInNotice } from './sign-in-notice';
 import { TerminalView } from './terminal-view';
 
 /**
@@ -25,7 +26,7 @@ import { TerminalView } from './terminal-view';
 @Component({
   selector: 'app-embedded-session',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [QitsButton, TerminalView],
+  imports: [QitsButton, SignInNotice, TerminalView],
   template: `
     @switch (branch().kind) {
       @case ('resolving') {
@@ -52,9 +53,9 @@ import { TerminalView } from './terminal-view';
       @case ('signin') {
         <div class="signin">
           <p class="note">
-            The agent is not signed in, so the launch answered with a sign-in terminal instead of a
-            session. Complete the sign-in below — it writes to the shared agent home, so it signs in
-            every workspace at once. When this terminal exits, the launch you asked for is replayed.
+            This is the sign-in terminal you asked for, not a session. Complete the sign-in here — it
+            writes to the shared agent home, so it signs in every workspace at once — and then start
+            the session you wanted. Nothing is relaunched when this exits.
           </p>
           <app-terminal-view
             [frames]="session.frames()"
@@ -150,6 +151,15 @@ import { TerminalView } from './terminal-view';
       }
     }
 
+    <!--
+      Outside the switch, and hidden only while the terminal it offers is the thing on screen: the
+      refusal is true of every branch a launch can be attempted from, and it is what the idle
+      choice's Start button will meet again until somebody signs in.
+    -->
+    @if (branch().kind !== 'signin') {
+      <app-sign-in-notice [workspaceRowId]="workspaceRowId()" />
+    }
+
     @if (session.problem(); as text) {
       <p class="problem" role="alert">
         ⚠ {{ text }}
@@ -236,6 +246,15 @@ export class EmbeddedSession {
   private readonly nav = inject(FileNavigation);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
+
+  /**
+   * Which workspace's container this session lives in.
+   *
+   * An input rather than a read off {@link AgentSession}: the resolution is pointed at a workspace by
+   * the panel above, and a component that took the id from the service it drives would be reading its
+   * own instruction back.
+   */
+  readonly workspaceRowId = input.required<number>();
 
   protected readonly branch = this.session.branch;
 

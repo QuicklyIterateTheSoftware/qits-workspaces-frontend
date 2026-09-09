@@ -408,8 +408,11 @@ describe('PromptPanel', () => {
     await settle();
 
     const launch = http.expectOne('/workspaces/container/7/agents');
+    // The surface rides the body. This request is byte-identical to the refining route's in
+    // qits-projects-frontend without it, so it is the only thing that says which chat this is.
     expect(launch.request.body).toEqual({
       scope: 'REPOSITORY',
+      surface: 'workspace.chat',
       mode: 'CHAT',
       initialContext: 'build the thing',
       deliverTaskPrompt: false,
@@ -418,6 +421,42 @@ describe('PromptPanel', () => {
     await settle();
 
     expect(host.launched()).toBe('cmd-9');
+  });
+
+  it('says nobody is signed in, and offers the terminal instead of opening one', async () => {
+    // The bug this closes: the launch used to *become* a login terminal and this panel handed the
+    // caller a `TERMINAL` command to attach a conversation to. Nothing in the answer said so.
+    await opened();
+
+    type('build the thing');
+    press('Start the conversation');
+    await settle();
+    http.expectOne(DRAFT_URL).flush({ draft: { content: '{}', updatedAt: 'T1' } });
+    await settle();
+
+    http.expectOne('/workspaces/container/7/agents').flush(
+      {
+        message:
+          'Nobody has signed Claude Code in on this platform’s shared credential volume, so this' +
+          ' session cannot start. Open the Claude Code sign-in terminal to complete it once for' +
+          ' every container on the volume.',
+      },
+      { status: 409, statusText: 'Conflict' },
+    );
+    await settle();
+
+    expect(host.launched()).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('Nobody has signed Claude Code in');
+    // Said plainly, and not as the generic "the agent did not start" this used to fall through to.
+    expect(fixture.nativeElement.textContent).not.toContain('The agent did not start');
+
+    // And the door is a press, which is the whole difference.
+    press('Open the sign-in terminal');
+    await settle();
+    const door = http.expectOne('/workspaces/container/7/agents/sign-in');
+    expect(door.request.body).toEqual({ agentType: 'CLAUDE' });
+    door.flush({ command: { id: 'login1', actionName: 'Claude sign-in', agentSessions: [] } });
+    await settle();
   });
 
   it('aborts the launch when the flush fails, and says why', async () => {

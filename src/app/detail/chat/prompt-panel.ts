@@ -10,12 +10,15 @@ import {
   signal,
   untracked,
 } from '@angular/core';
+import { Router } from '@angular/router';
 import { QitsButton } from '@qits/ui-components';
 import { CommandsApi, type CommandDto } from '../../api/commands-api';
 import { PromptDraftApi } from '../../api/prompt-draft-api';
 import { SpeechApi } from '../../api/speech-api';
 import { WorkspaceEvents } from '../../api/workspace-events';
 import { relativeSince } from '../../ui/format';
+import { AgentSignIn, isSignInTerminal } from '../agents/agent-sign-in';
+import { SignInNotice } from '../agents/sign-in-notice';
 import { FileNavigation } from '../files/file-navigation';
 import { describeError } from '../../ui/loadable';
 import { LevelMeter } from './level-meter';
@@ -89,11 +92,20 @@ type SaveState = 'clean' | 'pending' | 'saving' | 'dirty';
  * inverts back to *fetch* and the discipline has to already be there; and a draft that failed to
  * save is work about to be lost, which is worth aborting for on its own. **Launching with the wrong
  * prompt is worse than not launching.**
+ *
+ * ## Not signed in is said here, and answered in the Agents tab
+ *
+ * A launch refused because nobody has signed the harness in is not an error line: it has a next step,
+ * and that step is a terminal. So the refusal goes to {@link ../agents/agent-sign-in#AgentSignIn},
+ * the notice offers to open the sign-in terminal, and pressing it jumps to the Agents tab — which is
+ * where this page renders a PTY, and where the same notice is already waiting. What this replaces is
+ * the silence: the launch used to *become* that terminal, and this panel handed the caller a
+ * `TERMINAL` command to attach a chat socket to.
  */
 @Component({
   selector: 'app-prompt-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [LevelMeter, QitsButton],
+  imports: [LevelMeter, QitsButton, SignInNotice],
   templateUrl: './prompt-panel.html',
   styleUrl: './prompt-panel.css',
 })
@@ -104,6 +116,8 @@ export class PromptPanel {
   private readonly events = inject(WorkspaceEvents);
   protected readonly picked = inject(PickedContext);
   private readonly nav = inject(FileNavigation);
+  protected readonly signIn = inject(AgentSignIn);
+  private readonly router = inject(Router);
 
   /** Which workspace's container to launch in, and whose draft to hold. */
   readonly workspaceRowId = input.required<number>();
@@ -531,16 +545,49 @@ export class PromptPanel {
       }
       const command = await this.commandsApi.launchAgent(this.workspaceRowId(), {
         scope: 'REPOSITORY',
+        // One line of body, and the reason it matters: this request is **byte-identical to the
+        // refining route's** in qits-projects-frontend — same scope, same mode, same composed
+        // `initialContext` — so the workspace daemon serving both cannot tell an epic's chat from an
+        // ad-hoc workspace's, and neither can anything downstream. Until both frontends name their
+        // own surface, one configuration cannot be given to an epic's chat without giving it to
+        // every ad-hoc workspace chat as well.
+        surface: 'workspace.chat',
         mode: 'CHAT',
         initialContext: this.composed(),
         deliverTaskPrompt: false,
       });
+      if (isSignInTerminal(command)) {
+        // A daemon that still swaps the session for a login REPL. It is a `TERMINAL`, so attaching
+        // this tab's conversation to it would attach a chat socket to a PTY and show nothing; the
+        // notice goes up instead, and the terminal opens on a press.
+        this.signIn.adopt(command);
+        return;
+      }
       this.launched.emit(command);
     } catch (error) {
-      this.launchProblem.set(`The agent did not start — ${describeError(error)}.`);
+      // Not signed in has a next step, so it is the sign-in surface's rather than an error line.
+      if (!this.signIn.refuse(error)) {
+        this.launchProblem.set(`The agent did not start — ${describeError(error)}.`);
+      }
     } finally {
       this.launching.set(false);
     }
+  }
+
+  /**
+   * The sign-in terminal is open — go to where it is drawn.
+   *
+   * A URL write, like every other cross-tab jump on this page, so a press and a pasted link take the
+   * same path. It runs *after* the launch has answered: a jump to a tab with nothing in it would be
+   * the same unexplained relocation this whole surface exists to end.
+   */
+  protected goToAgents(): void {
+    // Written off the current URL rather than relative to an `ActivatedRoute`, the way the file
+    // browser's jumps are: this panel is mounted deep inside a tab host, and the tab is a query
+    // parameter on the route above it, so the whole write is "keep the URL, set `tab`".
+    const tree = this.router.parseUrl(this.router.url);
+    tree.queryParams = { ...tree.queryParams, tab: 'agents' };
+    void this.router.navigateByUrl(tree);
   }
 
   private clearTimer(): void {

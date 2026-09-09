@@ -59,6 +59,7 @@ describe('CommandsApi', () => {
     // on the platform — the agent would be told to call something that does not exist.
     const answer = api.launchAgent(7, {
       scope: 'REPOSITORY',
+      surface: 'workspace.chat',
       mode: 'CHAT',
       initialContext: 'add a health check',
       deliverTaskPrompt: false,
@@ -66,13 +67,36 @@ describe('CommandsApi', () => {
     const request = http.expectOne('/workspaces/container/7/agents');
     request.flush({ command: COMMAND });
 
+    // The surface rides the body verbatim. It is what tells this request apart from the refining
+    // route's, which is byte-identical in every other field and reaches the same daemon.
     expect(request.request.body).toEqual({
       scope: 'REPOSITORY',
+      surface: 'workspace.chat',
       mode: 'CHAT',
       initialContext: 'add a health check',
       deliverTaskPrompt: false,
     });
     expect(await answer).toEqual(COMMAND);
+  });
+
+  it('opens the sign-in terminal as an ordinary launch, naming the harness that needs it', async () => {
+    // A door, not a fallback: it used to be what `POST /agents` *became* when nobody was signed in.
+    const answer = api.launchSignIn(7, 'CLAUDE');
+    const request = http.expectOne('/workspaces/container/7/agents/sign-in');
+    request.flush({ command: { ...COMMAND, actionName: 'Claude sign-in' } });
+
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({ agentType: 'CLAUDE' });
+    expect((await answer).actionName).toBe('Claude sign-in');
+  });
+
+  it('names no harness when the refusal named none, and lets the container resolve its default', async () => {
+    const answer = api.launchSignIn(7);
+    const request = http.expectOne('/workspaces/container/7/agents/sign-in');
+    request.flush({ command: COMMAND });
+
+    expect(request.request.body).toEqual({});
+    await answer;
   });
 
   it('terminates by id and answers the command in its post-terminate state', async () => {

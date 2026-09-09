@@ -6,6 +6,7 @@ import { EVENT_SOURCE_FACTORY, type EventSourceLike } from '../../api/event-sour
 import { WEB_SOCKET_FACTORY, WEB_SOCKET_OPEN, type WebSocketLike } from '../../api/web-socket';
 import { WorkspaceCommands } from '../../api/workspace-commands';
 import { AgentSession } from './agent-session';
+import { AgentSignIn } from './agent-sign-in';
 
 /** Several turns, because a client call is several awaits deep. */
 const settle = async () => {
@@ -160,7 +161,13 @@ describe('AgentSession', () => {
     const launch = http.expectOne('/workspaces/container/7/agents');
     // No `agentType`: the automatic launch takes the container's own resolved default rather than
     // this page naming one. Only a launch a person asked for may pick a harness.
-    expect(launch.request.body).toEqual({ scope: 'REPOSITORY', mode: 'INTERACTIVE' });
+    // The surface rides every launch, automatic ones included. It is what tells this request apart
+    // from the refining route's `epic.agent`, which is byte-identical in every other field.
+    expect(launch.request.body).toEqual({
+      scope: 'REPOSITORY',
+      surface: 'workspace.agent',
+      mode: 'INTERACTIVE',
+    });
     // `deliverTaskPrompt` is never set: the tool it names is not implemented anywhere.
     expect(launch.request.body.deliverTaskPrompt).toBeUndefined();
     launch.flush({ command: command({ id: 'c9', agentSessions: [session('s9')] }) });
@@ -197,6 +204,7 @@ describe('AgentSession', () => {
     const launch = http.expectOne('/workspaces/container/7/agents');
     expect(launch.request.body).toEqual({
       scope: 'REPOSITORY',
+      surface: 'workspace.agent',
       mode: 'INTERACTIVE',
       resumeSessionId: 's1',
       fork: true,
@@ -219,37 +227,91 @@ describe('AgentSession', () => {
     expect(service.branch()).toEqual({ kind: 'attached', commandId: 'c2' });
   });
 
-  it('renders a sign-in terminal in place and replays the launch it interrupted', async () => {
+  it('says nobody is signed in and opens no terminal until somebody presses', async () => {
     const service = await open(
       [command({ id: 'c1', status: 'EXITED', agentSessions: [session('s1')] })],
       [{ sessionId: 's1', subagents: [], children: [] }],
     );
+    const signIn = TestBed.inject(AgentSignIn);
 
     void service.startFresh('CLAUDE');
     await settle();
-    // Not signed in: the launch answers a login terminal with no lineage and the daemon's own name.
-    http
-      .expectOne('/workspaces/container/7/agents')
-      .flush({ command: command({ id: 'login1', actionName: 'Claude sign-in' }) });
+    // The refusal the harness library throws, as the daemon reports it. Nothing was launched.
+    http.expectOne('/workspaces/container/7/agents').flush(
+      {
+        message:
+          'Nobody has signed Claude Code in on this platform’s shared credential volume, so this' +
+          ' session cannot start. Open the Claude Code sign-in terminal to complete it once for' +
+          ' every container on the volume.',
+      },
+      { status: 409, statusText: 'Conflict' },
+    );
     await settle();
-    await answer([command({ id: 'login1', actionName: 'Claude sign-in' })]);
+    TestBed.tick();
+    await settle();
+
+    expect(signIn.refusal()?.harness).toBe('CLAUDE');
+    expect(signIn.refusal()?.message).toContain('sign-in terminal');
+    // Not an error line — the refusal has a next step, so it does not land on the problem surface.
+    expect(service.problem()).toBeNull();
+    // **The whole point.** Nothing is attached and nothing is on screen but the offer.
+    expect(service.branch()).toEqual({ kind: 'idle' });
+    expect(sockets).toHaveLength(0);
+
+    // The press. An ordinary launch, and only now is there a terminal.
+    void signIn.open(7);
+    await settle();
+    const door = http.expectOne('/workspaces/container/7/agents/sign-in');
+    expect(door.request.body).toEqual({ agentType: 'CLAUDE' });
+    door.flush({ command: command({ id: 'login1', actionName: 'Claude sign-in' }) });
+    await settle();
+    TestBed.tick();
+    await settle();
 
     expect(service.branch()).toEqual({ kind: 'signin', commandId: 'login1' });
     expect(sockets[sockets.length - 1].url).toContain('/terminal/commands/login1');
 
-    // The operator completes the sign-in and the terminal exits. That is the trigger.
+    // The operator completes the sign-in and the terminal exits. Nothing is replayed: the session
+    // starts where every other one does, at a press.
     await refresh([command({ id: 'login1', actionName: 'Claude sign-in', status: 'EXITED' })]);
 
-    const replay = http.expectOne('/workspaces/container/7/agents');
-    expect(replay.request.body).toEqual({
-      scope: 'REPOSITORY',
-      mode: 'INTERACTIVE',
-      agentType: 'CLAUDE',
-    });
-    replay.flush({ command: command({ id: 'c5', agentSessions: [session('s5')] }) });
+    expect(signIn.refusal()).toBeNull();
+    expect(service.branch()).toEqual({ kind: 'idle' });
+    http.expectNone('/workspaces/container/7/agents');
+  });
+
+  it('is not dropped into a login terminal by a daemon that still swaps one in', async () => {
+    // Until the daemon runs the library that refuses, a signed-out launch answers a login terminal
+    // instead of a session. It is recognised, and it is not attached to.
+    const service = await open(
+      [command({ id: 'c1', status: 'EXITED', agentSessions: [session('s1')] })],
+      [{ sessionId: 's1', subagents: [], children: [] }],
+    );
+    const signIn = TestBed.inject(AgentSignIn);
+
+    void service.startFresh('CLAUDE');
     await settle();
-    await answer([command({ id: 'c5', agentSessions: [session('s5')] })]);
-    expect(service.branch()).toEqual({ kind: 'attached', commandId: 'c5' });
+    http
+      .expectOne('/workspaces/container/7/agents')
+      .flush({ command: command({ id: 'login1', actionName: 'Claude sign-in' }) });
+    await settle();
+    await answer([
+      command({ id: 'c1', status: 'EXITED', agentSessions: [session('s1')] }),
+      command({ id: 'login1', actionName: 'Claude sign-in' }),
+    ]);
+
+    expect(signIn.refusal()).not.toBeNull();
+    expect(service.branch()).toEqual({ kind: 'idle' });
+    expect(sockets).toHaveLength(0);
+
+    // The terminal is already spawned, so the press reveals it rather than starting a second REPL
+    // to race the first for the same credential file.
+    void signIn.open(7);
+    await settle();
+    TestBed.tick();
+    await settle();
+    http.expectNone('/workspaces/container/7/agents/sign-in');
+    expect(service.branch()).toEqual({ kind: 'signin', commandId: 'login1' });
   });
 
   it('says the container is gone rather than showing an empty session', async () => {
