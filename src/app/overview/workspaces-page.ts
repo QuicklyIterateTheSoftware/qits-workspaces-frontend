@@ -10,11 +10,22 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { QITS_REPOSITORIES, QITS_SCOPE, scopeCommands } from '@qits/ui-components';
+import {
+  QITS_REPOSITORIES,
+  QITS_SCOPE,
+  QitsAppLinks,
+  scopeCommands,
+} from '@qits/ui-components';
 import type { ProjectDto, RepositoryDto, WorkspaceDto } from '../api/dto';
 import { ProjectsApi } from '../api/projects-api';
 import { WorkspacesApi } from '../api/workspaces-api';
 import { serverMessage } from '../ui/loadable';
+import {
+  workspaceSubject,
+  workspaceSubjectLabel,
+  workspaceSubjectPath,
+  type WorkspaceSubject,
+} from '../ui/workspace-subject';
 
 /** One project's wrapper repository, named as the picker shows it. */
 interface Choice {
@@ -70,6 +81,7 @@ export class WorkspacesPage implements OnInit {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly qitsScope = inject(QITS_SCOPE);
+  private readonly appLinks = inject(QitsAppLinks);
   private readonly qitsRepositories = inject(QITS_REPOSITORIES);
 
   protected readonly choices = signal<readonly Choice[]>([]);
@@ -113,6 +125,43 @@ export class WorkspacesPage implements OnInit {
       ? this.qitsScope.repositoryId()
       : this.qitsRepositories.wrapperRepositoryId();
   });
+
+  /**
+   * What a row is for, where a dispatch said so — the reference that makes a list of branch names
+   * answer "what is this workspace about" without opening one. `null` for a hand-made workspace.
+   */
+  protected subjectOf(workspace: WorkspaceDto): WorkspaceSubject | null {
+    return workspaceSubject(workspace);
+  }
+
+  /** How the reference reads. */
+  protected labelOf(subject: WorkspaceSubject): string {
+    return workspaceSubjectLabel(subject);
+  }
+
+  /**
+   * Where the reference points, or `undefined` when this page cannot honestly spell the address —
+   * the platform has stated no origin for qits-projects yet, no project is on screen, or the branch
+   * spells no slug. The label is rendered either way.
+   *
+   * <p>The project comes from the address when there is one and from the picked repository's project
+   * otherwise, because the unscoped form is a picker over every project's wrapper and the rows below
+   * it belong to whichever one is selected.
+   */
+  protected subjectHrefOf(subject: WorkspaceSubject): string | undefined {
+    const project = this.qitsScope.scope().project ?? this.selectedProjectSlug();
+    if (!project) {
+      return undefined;
+    }
+    const path = workspaceSubjectPath(subject);
+    return path ? this.appLinks.href('qits-projects', path, { project }) : undefined;
+  }
+
+  /** The picked repository's project, for the unscoped form. */
+  private selectedProjectSlug(): string | undefined {
+    return this.choices().find((choice) => choice.repository.id === this.selectedRepositoryId)
+      ?.project.slug;
+  }
 
   /** Whether the address states a project. It is what hides the picker. */
   protected readonly scoped = computed(() => this.qitsScope.scope().project !== undefined);

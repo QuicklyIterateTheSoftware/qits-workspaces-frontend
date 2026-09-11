@@ -39,6 +39,25 @@ topic names, each panel re-fetches through the ordinary REST endpoints when its 
 idle workspace produces no traffic at all. A fourth read happens in exactly one case — the id is not
 in the active list, which means the work has resolved.
 
+**A dispatched workspace says what it is for; a hand-made one says what it is about.** The header
+renders one paragraph under the branch, and which one depends on the row. A workspace qits-projects
+dispatched carries `ticketId` or `epicId` — the ticket or epic it was dispatched from, by id — and
+what is drawn is a short **reference**, linked into qits-projects. A workspace a person created by
+hand carries neither and keeps its `preamble`, the prose goal authored at creation, which is what a
+preamble is for. Every workspace made before the fields existed is in the second state and stays
+readable there; nothing derives a reference from prose.
+
+The link is composed through `QitsAppLinks.href('qits-projects', …)` — the chrome's own
+cross-application seam, which reads that application's origin off `/main-navigation` — and never onto
+an origin this page works out. **The slug comes off the workspace's own branch** (`ticket/<slug>`),
+because qits-projects spells addresses with slugs while the field carries an id, and there is no
+cross-application read to turn one into the other; the dispatch cut that branch from that slug in the
+same call, so it is a reading rather than a guess. An epic has no detail route over there, so an epic
+reference opens the project's epics board. Where the platform has stated no origin, no project is on
+screen, or the branch spells no slug, the reference renders **without a link** — the field still says
+what the workspace is for. `ui/workspace-subject.ts` is all of that, and the overview's rows draw the
+same reference under each branch name.
+
 **On every connect and every reconnect, everything is invalidated once.** There is no replay
 protocol, no `Last-Event-ID` and no resume token, because the server offers none; the browser's own
 reconnect handles the retry and one burst of requests closes the gap. It costs a duplicate burst on

@@ -290,6 +290,38 @@ describe('WorkspaceDetailPage', () => {
     expect(element().querySelector('app-tab-host')).toBeNull();
   });
 
+  /**
+   * A dispatched workspace names its subject in a field and carries no goal, so the header says what
+   * it is for instead of quoting a ticket that has moved on since.
+   *
+   * The link itself is not asserted here: composing one needs the platform's navigation document and
+   * a project in the address, and these specs run unscoped with neither. That absence IS a case —
+   * the reference still has to say what the workspace is about — so what is pinned is the label, and
+   * `workspace-subject.spec` pins the address the label is linked to.
+   */
+  it('shows a dispatched workspace its reference instead of a goal', async () => {
+    await open('/repositories/qits-ci/workspaces/7', [
+      workspace(7, 'widgets', { branch: 'ticket/fix-login', ticketId: 't-1', preamble: null }),
+    ]);
+
+    const subject = element().querySelector('.subject');
+    expect(subject?.textContent?.trim()).toBe('Ticket fix-login');
+    expect(element().querySelector('.preamble')).toBeNull();
+  });
+
+  /**
+   * The other half, and the reason the prose was not simply deleted: a workspace a person created
+   * by hand states its scope in a preamble, and so does every workspace that predates the fields.
+   */
+  it('keeps the prose goal of a workspace nobody dispatched', async () => {
+    await open('/repositories/qits-ci/workspaces/7', [
+      workspace(7, 'widgets', { preamble: 'Speed up the export' }),
+    ]);
+
+    expect(element().querySelector('.preamble')?.textContent).toContain('Speed up the export');
+    expect(element().querySelector('.subject')).toBeNull();
+  });
+
   it('says so plainly when there is no such workspace, live or resolved', async () => {
     await open('/repositories/qits-ci/workspaces/9', [workspace(7, 'widgets')]);
 

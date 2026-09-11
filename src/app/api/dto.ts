@@ -67,6 +67,23 @@ export interface WorkspaceDto {
   readonly clean: boolean | null;
   readonly agentActivity: AgentActivityState | null;
   readonly preamble: string | null;
+
+  /**
+   * What a **dispatched** workspace is for: the qits-projects ticket or epic the dispatch was about,
+   * by id. Both `null` for a workspace a person created by hand — which states its scope in its
+   * `preamble` instead — and for every workspace created before the fields existed.
+   *
+   * **Optional**, for the reason `admin` and `createdAt` are: a deployed qits-workspaces that
+   * predates them answers neither, and `undefined` says exactly that rather than claiming the
+   * workspace was hand-made.
+   *
+   * Neither id is resolved anywhere — there is no cross-application read — so what turns one into a
+   * link is `ui/workspace-subject`, which takes the *slug* off the workspace's own branch and
+   * composes the address through `QitsAppLinks`.
+   */
+  readonly ticketId?: string | null;
+  readonly epicId?: string | null;
+
   readonly result: string | null;
   readonly resolvedAt: string | null;
   readonly daemonConnectedAt: string | null;

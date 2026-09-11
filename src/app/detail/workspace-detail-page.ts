@@ -10,7 +10,7 @@ import {
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
-import { QITS_SCOPE, scopeCommands } from '@qits/ui-components';
+import { QITS_SCOPE, QitsAppLinks, scopeCommands } from '@qits/ui-components';
 import type { RepositoryDto, WorkspaceDto, WorkspaceHistoryDetailDto } from '../api/dto';
 import { ProjectsApi } from '../api/projects-api';
 import { WorkspaceCommands } from '../api/workspace-commands';
@@ -20,6 +20,11 @@ import { WorkspaceServices } from '../api/workspace-services';
 import { WorkspacesApi } from '../api/workspaces-api';
 import type { MergeResult } from '../merge/merge-outcome';
 import { Async } from '../ui/async';
+import {
+  workspaceSubject,
+  workspaceSubjectLabel,
+  workspaceSubjectPath,
+} from '../ui/workspace-subject';
 import { IDLE, LOADING, failed, ready, type Loadable } from '../ui/loadable';
 import { ActionsPanel } from './actions/actions-panel';
 import { ActivityBar } from './activity-bar';
@@ -128,6 +133,7 @@ export class WorkspaceDetailPage {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly qitsScope = inject(QITS_SCOPE);
+  private readonly appLinks = inject(QitsAppLinks);
 
   /**
    * Where this page's own links start. The same workspace is reachable bare and under the
@@ -305,6 +311,53 @@ export class WorkspaceDetailPage {
     const state = this.repository();
     return state.kind === 'ready' ? state.value.mainBranch : '';
   });
+
+  /**
+   * What this workspace is for, where a dispatch said so — the reference that stands in place of the
+   * prose goal, and `null` for a workspace a person created by hand.
+   */
+  protected readonly subject = computed(() => workspaceSubject(this.workspace()));
+
+  /** How the reference reads. `Ticket fix-login`, never the id. */
+  protected readonly subjectLabel = computed(() => {
+    const subject = this.subject();
+    return subject ? workspaceSubjectLabel(subject) : '';
+  });
+
+  /**
+   * Where the reference points, or `undefined` for a name this page cannot honestly spell — the
+   * platform has not served its navigation yet, the address names no project, or the branch spells
+   * no slug. The label is still rendered then: the field says what the workspace is for whether or
+   * not there is somewhere to send a click.
+   *
+   * <p>Composed through {@link QitsAppLinks}, the chrome's own cross-application seam, rather than
+   * onto an origin this page works out: an application's origin is something the platform states
+   * (`/main-navigation`), and every time a frontend here derived one instead it got it wrong — see
+   * `editor/editor-origin`, which carries three of those.
+   */
+  protected readonly subjectHref = computed(() => {
+    const subject = this.subject();
+    const project = this.qitsScope.scope().project;
+    if (!subject || !project) {
+      return undefined;
+    }
+    const path = workspaceSubjectPath(subject);
+    // The project alone, never the scope on screen: this page's address may name a repository, and
+    // qits-projects serves no ticket under one.
+    return path ? this.appLinks.href('qits-projects', path, { project }) : undefined;
+  });
+
+  /**
+   * What the prompt-rewrite call is told this workspace is about.
+   *
+   * The goal where a person wrote one, and **the short reference** for a dispatched workspace, which
+   * has no goal any more. Not the ticket's text: nothing on this side has it, and fetching it per
+   * rewrite would be a cross-application read for a hint. A reference is a small, true thing to say,
+   * which is better than the stale paragraph it replaces and than saying nothing.
+   */
+  protected readonly rewriteContext = computed(
+    () => this.subjectLabel() || this.workspace()?.preamble || null,
+  );
 
   protected readonly title = computed(() => this.workspace()?.workspaceId ?? 'Workspace');
 

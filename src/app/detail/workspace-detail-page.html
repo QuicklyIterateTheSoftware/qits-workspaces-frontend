@@ -25,7 +25,15 @@
           >
         }
       </p>
-      @if (ws.preamble) {
+      @if (subject(); as ref) {
+        <p class="subject">
+          @if (subjectHref(); as href) {
+            <a [href]="href">{{ subjectLabel() }}</a>
+          } @else {
+            <span>{{ subjectLabel() }}</span>
+          }
+        </p>
+      } @else if (ws.preamble) {
         <p class="preamble">{{ ws.preamble }}</p>
       }
     </header>
@@ -73,7 +81,7 @@
       @for (tab of durableTabs; track tab.slug) {
         <ng-template [appTabPanel]="tab.slug">
           @if (tab.slug === 'chat') {
-            <app-chat-panel [workspaceRowId]="ws.id" [preamble]="ws.preamble" />
+            <app-chat-panel [workspaceRowId]="ws.id" [preamble]="rewriteContext()" />
           } @else if (tab.slug === 'files') {
             <app-files-panel [workspaceRowId]="ws.id" [visible]="selected() === 'files'" />
           } @else if (tab.slug === 'services') {

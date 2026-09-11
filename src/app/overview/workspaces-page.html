@@ -84,6 +84,15 @@
               }
               <span>{{ workspace.runtimeStatus?.toLowerCase() ?? 'runtime unknown' }}</span>
             </a>
+            @if (subjectOf(workspace); as ref) {
+              <p class="subject">
+                @if (subjectHrefOf(ref); as href) {
+                  <a [href]="href">{{ labelOf(ref) }}</a>
+                } @else {
+                  <span>{{ labelOf(ref) }}</span>
+                }
+              </p>
+            }
           </li>
         }
       </ul>

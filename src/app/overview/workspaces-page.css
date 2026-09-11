@@ -160,3 +160,17 @@ li span {
     padding: 2rem 1rem;
   }
 }
+
+/* What a dispatched row is for. Outside the row's own anchor — a link inside a link is not HTML. */
+.subject {
+  margin: 0.15rem 0 0;
+  font-size: 0.85rem;
+}
+
+.subject a {
+  color: #1d4ed8;
+}
+
+.subject span {
+  color: #4b5563;
+}
