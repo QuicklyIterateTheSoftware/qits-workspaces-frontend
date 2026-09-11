@@ -40,11 +40,14 @@ export interface TerminalSize {
     .terminal-host {
       box-sizing: border-box;
       /* Only until relayout() has measured the room below the fold; these two bounds clamp what it
-         measures, so a cramped viewport still gets a usable terminal and a tall one is not all
-         terminal. */
-      height: min(26rem, 55vh);
+         measures. The floor keeps a cramped viewport usable. The ceiling deliberately sits just
+         under the viewport: a tall page is meant to be nearly all terminal, and the clamp is left
+         in only to catch a pane that reports something absurd. The initial height is a guess at
+         the room, on screen until the lazy xterm chunk lands and relayout() runs, so it tracks the
+         viewport too rather than jumping a screen's worth when the measurement arrives. */
+      height: min(40rem, 70vh);
       min-height: 12rem;
-      max-height: 30rem;
+      max-height: 95vh;
       overflow: hidden;
       /* Horizontal only: the fit addon sizes rows against the host's client height, which includes
          vertical padding, so any y padding pushes the bottom row past the box. */
@@ -178,9 +181,10 @@ export class TerminalView {
   /**
    * Size the host to the room between its top edge and the foot of the scrolling pane, so the
    * bottom of the terminal — the row the prompt sits on — ends above the fold instead of just past
-   * it. `min(26rem, 55vh)` guessed at that room and lost by a line on shorter viewports, because
-   * what stands above the terminal is the page's business, not the viewport's. The stylesheet's
-   * min/max clamp the answer; only the measured middle is supplied here.
+   * it. The stylesheet's `height` only ever guesses at that room — it loses by a line on shorter
+   * viewports and leaves a band of empty pane on taller ones, because what stands above the
+   * terminal is the page's business, not the viewport's. The stylesheet's min/max clamp the
+   * answer; only the measured middle is supplied here.
    */
   private relayout(): void {
     const host = this.host().nativeElement;
