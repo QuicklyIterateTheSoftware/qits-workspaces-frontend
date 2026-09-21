@@ -267,9 +267,29 @@ describe('WorkspaceDetailPage', () => {
     expect(element().textContent).toContain('task/other');
   });
 
-  it('does not open a resolved workspace — it shows the record and says why', async () => {
-    await open('/repositories/qits-ci/workspaces/9', [workspace(7, 'widgets')]);
+  const SESSIONS_URL = '/workspaces/api/history/9/agent-sessions';
 
+  const agentSession = (sessionId: string, over: Record<string, unknown> = {}) => ({
+    sessionId,
+    startedAt: '2026-07-31T21:00:00Z',
+    endedAt: '2026-07-31T21:29:00Z',
+    messageCount: 12,
+    subagents: [],
+    ...over,
+  });
+
+  /**
+   * The resolved page's own budget: the history record **and** the agent sessions, both read from
+   * the host and both asked exactly once. A test that answered only the record would leave the
+   * second request outstanding and `http.verify()` would say so — which is the point of flushing it
+   * here rather than loosening the verify.
+   */
+  async function openResolved(
+    sessions: readonly unknown[] = [],
+    record: Record<string, unknown> = {},
+    url = '/repositories/qits-ci/workspaces/9',
+  ): Promise<void> {
+    await open(url, [workspace(7, 'widgets')]);
     http.expectOne('/workspaces/api/history/9').flush({
       workspace: {
         id: 9,
@@ -281,13 +301,148 @@ describe('WorkspaceDetailPage', () => {
         createdAt: '2026-07-31T21:32:23Z',
         resolvedAt: '2026-07-31T21:32:35Z',
         events: [],
+        ...record,
       },
     });
+    http.expectOne(SESSIONS_URL).flush({ sessions });
     await settle();
+  }
+
+  function sessionRows(): HTMLElement[] {
+    return Array.from(element().querySelectorAll('.sessions .session'));
+  }
+
+  it('does not open a resolved workspace — it shows the record and says why', async () => {
+    await openResolved();
 
     expect(element().textContent).toContain('old-work');
     expect(element().textContent).toContain('the work is finished');
     expect(element().querySelector('app-tab-host')).toBeNull();
+  });
+
+  /**
+   * The whole point of the screen. The container is gone, so the daemon proxy answers 404 for every
+   * call about it; the host kept the sessions, and a reader who wants to know why the diff looks the
+   * way it does has nowhere else to look.
+   */
+  it('lists the agent sessions that ran in a resolved workspace', async () => {
+    await openResolved([
+      agentSession('s-refine', { messageCount: 31 }),
+      agentSession('s-implement', {
+        startedAt: '2026-07-31T21:30:00Z',
+        endedAt: null,
+        messageCount: 169,
+        subagents: [
+          { agentId: 'a-1', agentType: 'Explore', description: 'find the seam', messageCount: 42 },
+        ],
+      }),
+    ]);
+
+    const rows = sessionRows();
+    expect(rows.length).toBe(2);
+    expect(rows[0].textContent).toContain('31 messages');
+    expect(rows[1].textContent).toContain('169 messages');
+    // A sub-agent is summarised on the row that spawned it, so the pick is informed before the
+    // transcript is paid for.
+    expect(rows[1].textContent).toContain('Explore');
+    expect(rows[1].textContent).toContain('find the seam');
+    // A session that never wrote an ending says so rather than inventing a close time.
+    expect(rows[1].textContent).toContain('—');
+  });
+
+  /**
+   * An empty list is an answer and not a failure, so it must not be drawn as an error — that would
+   * send a reader looking for a fault that is not present.
+   *
+   * And it must not be drawn as "no agent ran" either, which is the stronger claim the wire does not
+   * support: an empty list is the common answer while the transcript volume is unmounted on the
+   * service, so a workspace that ran several sessions answers with none. The assertion below is on
+   * the weaker sentence *and* on the absence of the stronger one, because the failure mode here is a
+   * later edit quietly tightening the wording back into a lie.
+   */
+  it('says only that no sessions could be read — never that none ran', async () => {
+    await openResolved([]);
+
+    const empty = element().querySelector('app-empty')?.textContent ?? '';
+    expect(empty).toContain('No agent sessions could be read');
+    expect(empty).toContain('not the same as none having run');
+    expect(empty).not.toContain('ever ran');
+    expect(element().querySelector('.async-error')).toBeNull();
+  });
+
+  /**
+   * A transcript is the expensive read on this screen and is never made speculatively — which is
+   * also why the selection is in the URL rather than in a signal.
+   */
+  it('fetches no transcript until a session is picked', async () => {
+    await openResolved([agentSession('s-1')]);
+
+    http.expectNone((request) => request.url.includes('/transcript'));
+  });
+
+  /**
+   * Picked, fetched, and drawn by the live chat's own renderer — the lines are the shape the chat
+   * socket carries, so the record and the live view cannot disagree about a conversation.
+   */
+  it('opens the picked session and renders its conversation', async () => {
+    await openResolved([agentSession('s-1'), agentSession('s-2')]);
+
+    (sessionRows()[0].querySelector('.pick') as HTMLButtonElement).click();
+    await settle();
+
+    expect(TestBed.inject(Location).path()).toContain('session=s-1');
+    http.expectOne(`${SESSIONS_URL}/s-1/transcript`).flush({
+      lines: [
+        JSON.stringify({ type: 'user', text: 'make it faster' }),
+        JSON.stringify({
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'the export is the hot loop' }] },
+        }),
+      ],
+    });
+    await settle();
+
+    const replay = element().querySelector('.replay');
+    expect(replay?.textContent).toContain('make it faster');
+    expect(replay?.textContent).toContain('the export is the hot loop');
+  });
+
+  /** A different pick is a different conversation: the old one goes before the new one arrives. */
+  it('refetches the transcript when another session is picked', async () => {
+    await openResolved([agentSession('s-1'), agentSession('s-2')]);
+
+    (sessionRows()[0].querySelector('.pick') as HTMLButtonElement).click();
+    await settle();
+    http
+      .expectOne(`${SESSIONS_URL}/s-1/transcript`)
+      .flush({ lines: [JSON.stringify({ type: 'user', text: 'the first one' })] });
+    await settle();
+
+    (sessionRows()[1].querySelector('.pick') as HTMLButtonElement).click();
+    await settle();
+    http
+      .expectOne(`${SESSIONS_URL}/s-2/transcript`)
+      .flush({ lines: [JSON.stringify({ type: 'user', text: 'the second one' })] });
+    await settle();
+
+    expect(element().textContent).toContain('the second one');
+    expect(element().textContent).not.toContain('the first one');
+  });
+
+  /** A deep link lands on the conversation, not merely on the list it is in. */
+  it('opens the session named in the URL on load', async () => {
+    await openResolved(
+      [agentSession('s-1')],
+      {},
+      '/repositories/qits-ci/workspaces/9?session=s-1',
+    );
+
+    http
+      .expectOne(`${SESSIONS_URL}/s-1/transcript`)
+      .flush({ lines: [JSON.stringify({ type: 'user', text: 'linked straight here' })] });
+    await settle();
+
+    expect(element().querySelector('.replay')?.textContent).toContain('linked straight here');
   });
 
   /**
@@ -327,6 +482,11 @@ describe('WorkspaceDetailPage', () => {
 
     http
       .expectOne('/workspaces/api/history/9')
+      .flush({ message: 'Workspace not found: 9' }, { status: 404, statusText: 'Not Found' });
+    // The sessions read goes out beside the record rather than behind it — the two are independent
+    // host reads — so an id that is nowhere fails both, and both have to be answered here.
+    http
+      .expectOne(SESSIONS_URL)
       .flush({ message: 'Workspace not found: 9' }, { status: 404, statusText: 'Not Found' });
     await settle();
 

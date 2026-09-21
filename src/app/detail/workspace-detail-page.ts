@@ -11,7 +11,12 @@ import {
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { QITS_SCOPE, QitsAppLinks, scopeCommands } from '@qits/ui-components';
-import type { RepositoryDto, WorkspaceDto, WorkspaceHistoryDetailDto } from '../api/dto';
+import type {
+  RepositoryDto,
+  WorkspaceAgentSessionDto,
+  WorkspaceDto,
+  WorkspaceHistoryDetailDto,
+} from '../api/dto';
 import { ProjectsApi } from '../api/projects-api';
 import { WorkspaceCommands } from '../api/workspace-commands';
 import { WorkspaceDaemonApi } from '../api/workspace-daemon-api';
@@ -20,6 +25,8 @@ import { WorkspaceServices } from '../api/workspace-services';
 import { WorkspacesApi } from '../api/workspaces-api';
 import type { MergeResult } from '../merge/merge-outcome';
 import { Async } from '../ui/async';
+import { Empty } from '../ui/empty';
+import { NONE } from '../ui/format';
 import {
   workspaceSubject,
   workspaceSubjectLabel,
@@ -31,6 +38,8 @@ import { ActivityBar } from './activity-bar';
 import { AgentActivityMemory } from './agent-activity-memory';
 import { AgentsPanel } from './agents/agents-panel';
 import { ChatPanel } from './chat/chat-panel';
+import { EMPTY_CONVERSATION, buildConversation } from './chat/chat-model';
+import { Conversation } from './chat/conversation';
 import { FilesPanel } from './files/files-panel';
 import { PanelPlaceholder } from './panel-placeholder';
 import { ServicesPanel } from './services/services-panel';
@@ -110,6 +119,8 @@ const PANEL_NOTES: Readonly<Record<string, string>> = {};
     AgentsPanel,
     Async,
     ChatPanel,
+    Conversation,
+    Empty,
     FilesPanel,
     PanelPlaceholder,
     ServicesPanel,
@@ -155,6 +166,23 @@ export class WorkspaceDetailPage {
   protected readonly history = signal<Loadable<WorkspaceHistoryDetailDto>>(IDLE);
 
   /**
+   * The agent sessions that ran in a resolved workspace, and the transcript of the one being read.
+   *
+   * Two states rather than one, because they are asked for at different moments: the list is what a
+   * resolved page draws, and a transcript is only ever fetched once a reader has picked a session.
+   * Both start {@link IDLE} and stay there for a live workspace, which never draws either.
+   *
+   * The transcript is held as its raw lines rather than as a built conversation. Parsing is pure and
+   * cheap, and keeping the wire form is what lets {@link conversation} be a plain computed — and
+   * what keeps this page from owning any opinion about how a conversation reads.
+   */
+  protected readonly sessions = signal<Loadable<readonly WorkspaceAgentSessionDto[]>>(IDLE);
+  protected readonly transcript = signal<Loadable<readonly string[]>>(IDLE);
+
+  /** Drawn where a session never wrote an ending. */
+  protected readonly none = NONE;
+
+  /**
    * The remount guard.
    *
    * Angular reuses a component when only a path parameter changes, which is right for a tab and wrong
@@ -185,6 +213,9 @@ export class WorkspaceDetailPage {
   protected readonly landed = signal<readonly MergeResult[]>([]);
 
   private loadedRepositoryId: string | null = null;
+
+  /** Which session the transcript on hand belongs to, so a re-run of the effect is not a refetch. */
+  private readingSession: string | null = null;
 
   /** Which repository the list on hand belongs to. Read by {@link missing}. */
   private readonly listedRepositoryId = signal<string | null>(null);
@@ -231,12 +262,46 @@ export class WorkspaceDetailPage {
 
     // A resolved workspace is not in the active list, so a missing id is the signal to read the
     // record instead. It is asked once and never on a hint: a resolved workspace does not change.
+    //
+    // The agent sessions ride the same effect and the same reasoning. They are part of the record —
+    // what the work *was*, not what is happening — so a workspace that has resolved has exactly one
+    // answer for them, for ever. They are a second request rather than a field on the record because
+    // the record is a narrative of branch events and a session list is neither the same shape nor
+    // the same cost: a history record is small and a conversation index is not.
     effect(() => {
       const missing = this.missing();
       const workspaceId = this.workspaceId();
       untracked(() => {
-        if (missing && this.history().kind === 'idle') {
+        if (!missing) {
+          return;
+        }
+        if (this.history().kind === 'idle') {
           void this.loadHistory(workspaceId);
+        }
+        if (this.sessions().kind === 'idle') {
+          void this.loadSessions(workspaceId);
+        }
+      });
+    });
+
+    // Which session is being read is in the URL, so it is a link somebody can paste and a reload
+    // lands back on the same conversation. The transcript follows the parameter rather than the
+    // click: a back button that moved the highlight without moving the pane would be the one place
+    // on this page where the URL was decoration.
+    //
+    // A change of selection resets the state before fetching, so the previous session's conversation
+    // is never left on screen under the new session's heading while its request is in flight.
+    effect(() => {
+      const sessionId = this.missing() ? this.selectedSession() : null;
+      const workspaceId = this.workspaceId();
+      untracked(() => {
+        if (sessionId === this.readingSession) {
+          return;
+        }
+        this.readingSession = sessionId;
+        this.transcript.set(IDLE);
+        if (sessionId) {
+          void this.loadTranscript(workspaceId, sessionId);
         }
       });
     });
@@ -369,6 +434,33 @@ export class WorkspaceDetailPage {
     return isDurableTab(slug) ? slug! : DEFAULT_TAB;
   });
 
+  /**
+   * The session whose conversation is open, from `?session=`, or null for none picked.
+   *
+   * An id this workspace does not have is *not* normalised away the way an unknown `?tab=` is. The
+   * two absences are different: a tab slug is a closed vocabulary this page owns, so an unknown one
+   * is a typo with no possible meaning, while a session id is a server-side fact this page cannot
+   * check without asking — and the ask is the transcript request itself, whose 404 is a better
+   * answer ("that conversation is not here") than silently dropping what somebody linked to.
+   */
+  protected readonly selectedSession = computed(() => this.query().get('session'));
+
+  /**
+   * The open session's conversation, parsed.
+   *
+   * `buildConversation` is the live chat's own parser, used verbatim and fed the host's lines
+   * unchanged — the record and the live view are the same conversation and must not be two
+   * renderings of it. It handles the `qits_agent_meta` anchors that separate a session's own lines
+   * from its sub-agents', which is the whole reason a sub-agent's work appears under the `Task` call
+   * that spawned it here without this page knowing anything about side-chains.
+   */
+  protected readonly conversation = computed(() => {
+    const state = this.transcript();
+    return state.kind === 'ready' && state.value.length > 0
+      ? buildConversation(state.value)
+      : EMPTY_CONVERSATION;
+  });
+
   protected readonly selected = computed(() =>
     this.transient() && this.shownProcessId() ? STARTING_SLUG : this.urlTab(),
   );
@@ -485,6 +577,41 @@ export class WorkspaceDetailPage {
   }
 
   /**
+   * The workspace's agent sessions, from the host.
+   *
+   * Not through the daemon: a resolved workspace has no container, so the proxy answers 404 for
+   * every call — which is precisely the failure this surface replaces.
+   */
+  protected async loadSessions(workspaceId: number): Promise<void> {
+    this.sessions.set(LOADING);
+    try {
+      this.sessions.set(ready(await this.workspacesApi.agentSessions(workspaceId)));
+    } catch (error) {
+      this.sessions.set(failed(error));
+    }
+  }
+
+  protected async loadTranscript(workspaceId: number, sessionId: string): Promise<void> {
+    this.transcript.set(LOADING);
+    try {
+      this.transcript.set(ready(await this.workspacesApi.agentTranscript(workspaceId, sessionId)));
+    } catch (error) {
+      this.transcript.set(failed(error));
+    }
+  }
+
+  /**
+   * Retry the transcript of whichever session is open. The retry button has no session in hand —
+   * the selection is the URL's — so it reads it back rather than being passed one.
+   */
+  protected reloadTranscript(): void {
+    const sessionId = this.selectedSession();
+    if (sessionId) {
+      void this.loadTranscript(this.workspaceId(), sessionId);
+    }
+  }
+
+  /**
    * Ask what is running, and let the answer drive the transient tab.
    *
    * A null answer while a tab is showing means the operation finished without this page seeing its
@@ -520,6 +647,23 @@ export class WorkspaceDetailPage {
     void this.router.navigate([], {
       relativeTo: this.route,
       queryParams: { tab: slug },
+      queryParamsHandling: 'merge',
+    });
+  }
+
+  /**
+   * Open a session's conversation, or close the one that is open.
+   *
+   * A URL write and not a signal set, for the same reason the tab is: the selection is expensive
+   * state — it costs a transcript read — so it is addressable state. `merge` keeps whatever else is
+   * in the query, and a push rather than a replace makes the back button walk the sessions somebody
+   * has been reading, exactly as it walks tabs.
+   */
+  protected chooseSession(sessionId: string): void {
+    const open = this.selectedSession() === sessionId;
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { session: open ? null : sessionId },
       queryParamsHandling: 'merge',
     });
   }
@@ -569,6 +713,11 @@ export class WorkspaceDetailPage {
     this.mountedFor = workspaceId;
     untracked(() => {
       this.history.set(IDLE);
+      // The record's other half. `readingSession` goes with it, so the next workspace's selection —
+      // even the same id, which a `?session=` surviving the navigation would be — refetches.
+      this.sessions.set(IDLE);
+      this.transcript.set(IDLE);
+      this.readingSession = null;
       this.shownProcessId.set(null);
       this.transient.set(false);
       this.autoSelected = null;

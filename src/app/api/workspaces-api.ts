@@ -15,6 +15,9 @@ import type {
   MergeRequest,
   ServiceEventDto,
   ServiceEventsResponse,
+  WorkspaceAgentSessionDto,
+  WorkspaceAgentSessionsResponse,
+  WorkspaceAgentTranscriptResponse,
   WorkspaceDto,
   WorkspaceEntriesResponse,
   WorkspaceHistoryDetailDto,
@@ -307,5 +310,48 @@ export class WorkspacesApi {
       ),
     );
     return response.workspace;
+  }
+
+  /**
+   * The coding-agent sessions that ran in a workspace, for a workspace that has already resolved.
+   *
+   * **Host-owned, and it must not go through `WorkspaceDaemonApi`.** That client is the
+   * container proxy, and a resolved workspace has no container: every call through it answers 404,
+   * which is exactly the bug this endpoint exists to fix. The daemon's own session surface is the
+   * right reader while the workspace is *live* — that is what the Agents tab uses — and it stops
+   * existing the moment the container is destroyed. The host keeps the record, so the host is who
+   * this asks, on the plain `HttpClient` against `/workspaces/api/history/...` like
+   * {@link WorkspacesApi.history} beside it.
+   *
+   * Empty rather than 404 when no agent ever ran here: a workspace somebody drove by hand has no
+   * sessions, and that is a state to render.
+   */
+  async agentSessions(workspaceId: number): Promise<readonly WorkspaceAgentSessionDto[]> {
+    const response = await firstValueFrom(
+      this.http.get<WorkspaceAgentSessionsResponse>(
+        `${this.base}/workspaces/api/history/${encodeURIComponent(workspaceId)}/agent-sessions`,
+      ),
+    );
+    return response.sessions ?? [];
+  }
+
+  /**
+   * One of those sessions' conversation, as raw transcript lines.
+   *
+   * Host-owned for the same reason as {@link WorkspacesApi.agentSessions}: the proxy answers 404 for
+   * a workspace whose container is gone, so the record is read from the service that kept it.
+   *
+   * The lines are handed on untouched. They are the shape the live chat socket carries, so the
+   * caller feeds them to the same `buildConversation` and draws them with the same
+   * `<app-conversation>` — the record and the live view cannot disagree about a conversation when
+   * neither one owns the rendering of it.
+   */
+  async agentTranscript(workspaceId: number, sessionId: string): Promise<readonly string[]> {
+    const response = await firstValueFrom(
+      this.http.get<WorkspaceAgentTranscriptResponse>(
+        `${this.base}/workspaces/api/history/${encodeURIComponent(workspaceId)}/agent-sessions/${encodeURIComponent(sessionId)}/transcript`,
+      ),
+    );
+    return response.lines ?? [];
   }
 }

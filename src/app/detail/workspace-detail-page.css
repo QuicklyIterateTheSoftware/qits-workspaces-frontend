@@ -85,6 +85,83 @@
   color: #6b7280;
 }
 
+/* The conversations that made the workspace, under the timeline that says what became of it. */
+.agent-sessions {
+  margin: 1.1rem 0 0;
+}
+
+.agent-sessions h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+
+.sessions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session {
+  margin: 0.35rem 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.4rem;
+  padding: 0.4rem 0.55rem;
+}
+
+.session.open {
+  border-color: #1d4ed8;
+}
+
+/* The whole row is the target: picking between several sessions is a scan, not a hunt for a link. */
+.pick {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pick .ran {
+  color: #374151;
+  font-size: 0.86rem;
+}
+
+.said {
+  color: #6b7280;
+  font-size: 0.8rem;
+}
+
+.subagents {
+  margin: 0.25rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.subagents .kind {
+  color: #374151;
+  font-weight: 600;
+  margin-right: 0.35rem;
+}
+
+.subagents .what {
+  margin-right: 0.35rem;
+}
+
+/* The replay is long by nature, so it is boxed and scrolls inside the row rather than burying it. */
+.replay {
+  margin: 0.5rem 0 0;
+  max-height: 32rem;
+  overflow: auto;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 0.4rem;
+}
+
 code {
   font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
 }

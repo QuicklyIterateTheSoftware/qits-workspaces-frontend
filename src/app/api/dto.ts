@@ -203,8 +203,12 @@ export interface WorkspaceHistoryEventDto {
  * A resolved workspace, as the history surface serves it.
  *
  * It is the narrative record and **not** a detail view's data: there is no branch state, no runtime
- * status, no clean flag and no daemon. `commands` is always empty — the host's command-history port
- * has no implementation anywhere — so it is declared and never drawn.
+ * status, no clean flag and no daemon.
+ *
+ * It used to carry a `commands` field that was always empty, because the host's command-history port
+ * had no implementation anywhere; the port and the field are both gone now. What a reader actually
+ * wants from a finished workspace is the *conversations* that changed it, and those come from
+ * {@link WorkspaceAgentSessionDto} on a surface of their own rather than from this record.
  */
 export interface WorkspaceHistoryDetailDto {
   readonly id: number;
@@ -221,6 +225,75 @@ export interface WorkspaceHistoryDetailDto {
 /** The history read's envelope. */
 export interface WorkspaceHistoryDetailResponse {
   readonly workspace: WorkspaceHistoryDetailDto;
+}
+
+/**
+ * One side-chain a finished session's `Task` calls spawned, as the *host* records it.
+ *
+ * Field-for-field the daemon's own `AgentSubagentDto` minus the live-only parts: by the time the
+ * host holds a session there is nothing left to sweep, so `messageCount` is a settled number here
+ * rather than the daemon's "omitted means not swept yet".
+ *
+ * `agentType` and `description` stay agent-produced free text and either may be missing — an agent
+ * that spawned a `Task` without describing it is a normal thing, not a broken record — so they are
+ * nullable and are drawn as the words the agent chose, never matched against a vocabulary.
+ *
+ * This is a *summary* and not a place to read from: a subagent's own lines arrive inside the
+ * session's transcript, behind the `qits_agent_meta` anchor, and are drawn there.
+ */
+export interface WorkspaceAgentSubagentDto {
+  readonly agentId: string;
+  readonly agentType: string | null;
+  readonly description: string | null;
+  readonly messageCount: number;
+}
+
+/**
+ * One coding-agent session that ran in a workspace, as the host kept it after the container went.
+ *
+ * **A workspace normally has several.** Refine, implement and verify are separate dispatches into
+ * the same workspace, and each is its own session — so this is a list a reader picks from, and the
+ * fields here exist to make that pick possible: when it ran, how long it went on for, how much was
+ * said, and which sub-agents it spun up.
+ *
+ * `endedAt` is nullable although a settled session always has one: a session whose container was
+ * destroyed mid-run never wrote an ending, and drawing an em dash for it is honest where inventing a
+ * close time would not be.
+ */
+export interface WorkspaceAgentSessionDto {
+  readonly sessionId: string;
+  readonly startedAt: string;
+  readonly endedAt: string | null;
+  readonly messageCount: number;
+  readonly subagents: readonly WorkspaceAgentSubagentDto[];
+}
+
+/**
+ * The session-list envelope.
+ *
+ * **An empty `sessions` is a normal answer and not an error**, and it is the common one for now: the
+ * volume the host reads transcripts from is not mounted on the service yet, so a workspace that ran
+ * several sessions still answers with none until an operator applies it.
+ *
+ * That makes the empty case ambiguous by construction — it means "none could be read", never "none
+ * ran" — and a caller must not draw it as the second. Nothing on the wire distinguishes the two, so
+ * the honest rendering is the weaker claim.
+ */
+export interface WorkspaceAgentSessionsResponse {
+  readonly sessions: readonly WorkspaceAgentSessionDto[];
+}
+
+/**
+ * One session's conversation, as raw transcript lines.
+ *
+ * **Deliberately the same line shape the live chat socket carries** — one JSON object per line, the
+ * harness's own `stream-json` events plus the three synthetic lines qits adds — so the record and
+ * the live view are rendered by the same parser and the same component, and cannot drift into
+ * showing the same conversation two different ways. Nothing here interprets a line; they go straight
+ * into `buildConversation`.
+ */
+export interface WorkspaceAgentTranscriptResponse {
+  readonly lines: readonly string[];
 }
 
 /**

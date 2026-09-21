@@ -146,6 +146,123 @@
               </li>
             }
           </ol>
+
+          <!--
+            What actually happened in this workspace.
+
+            The event timeline above says what became of the *branch*; this says what the work was.
+            An agent changed the code here, and after the container is gone its conversation is the
+            only account of why the diff looks the way it does — so a resolved page that drew only
+            the timeline was showing the receipts and withholding the record.
+
+            It is read from the host, never from the container proxy: the proxy answers 404 for a
+            workspace whose container has been destroyed, which is every workspace on this screen.
+
+            Several sessions is the normal case, not the exception — refine, implement and verify are
+            separate dispatches into the same workspace — so this is a list to pick from, and each
+            row carries enough to pick with: when it ran, how much was said, and which sub-agents it
+            spun up. The conversation opens in place under the row rather than on a screen of its
+            own, because the question a reader has is usually "which of these was it", and an
+            in-place open keeps the other candidates a scroll away.
+          -->
+          <section class="agent-sessions" aria-label="Agent sessions">
+            <h2>Agent sessions</h2>
+
+            <app-async
+              [state]="sessions()"
+              loadingLabel="Loading the agent sessions"
+              errorLabel="Could not load the agent sessions"
+              (retry)="loadSessions(workspaceId())"
+            />
+
+            @if (sessions(); as list) {
+              @if (list.kind === 'ready') {
+                @if (list.value.length === 0) {
+                  <!--
+                    Carefully not "there were no sessions".
+
+                    An empty list is the *normal* answer here for now, and it does not mean what it
+                    looks like: the volume the transcripts are written to is not mounted on the
+                    service yet, so a workspace that genuinely ran four sessions still answers with
+                    none. A reader who is told "no agent ever ran here" about a workspace they
+                    watched an agent work in learns only that this page lies, and stops believing the
+                    rest of it. So the sentence says what is actually known — that none could be read
+                    — and leaves whether any ran an open question, which it is.
+                  -->
+                  <app-empty
+                    message="No agent sessions could be read for this workspace. That is not the same as none having run: a session becomes readable only once its transcript is somewhere the service can reach."
+                  />
+                } @else {
+                  <ul class="sessions">
+                    @for (session of list.value; track session.sessionId) {
+                      <li
+                        class="session"
+                        [class.open]="session.sessionId === selectedSession()"
+                        [attr.aria-label]="'Agent session started ' + session.startedAt"
+                      >
+                        <button
+                          type="button"
+                          class="pick"
+                          [attr.aria-expanded]="session.sessionId === selectedSession()"
+                          (click)="chooseSession(session.sessionId)"
+                        >
+                          <span class="ran">{{ session.startedAt }} → {{ session.endedAt ?? none }}</span>
+                          <span class="said">{{ session.messageCount }} messages</span>
+                        </button>
+
+                        @if (session.subagents.length > 0) {
+                          <ul class="subagents">
+                            @for (subagent of session.subagents; track subagent.agentId) {
+                              <li>
+                                <span class="kind">{{ subagent.agentType ?? 'Sub-agent' }}</span>
+                                @if (subagent.description) {
+                                  <span class="what">{{ subagent.description }}</span>
+                                }
+                                <span class="said">{{ subagent.messageCount }} messages</span>
+                              </li>
+                            }
+                          </ul>
+                        }
+
+                        @if (session.sessionId === selectedSession()) {
+                          <app-async
+                            [state]="transcript()"
+                            loadingLabel="Loading the transcript"
+                            errorLabel="Could not load the transcript"
+                            (retry)="reloadTranscript()"
+                          />
+                          @if (transcript(); as replay) {
+                            @if (replay.kind === 'ready') {
+                              @if (replay.value.length === 0) {
+                                <!--
+                                  Same restraint as the empty list above: the session is indexed, so
+                                  it ran, and all that is known here is that no lines came back for
+                                  it.
+                                -->
+                                <app-empty
+                                  message="No lines could be read for this session — its transcript is not where the service can reach it."
+                                />
+                              } @else {
+                                <!--
+                                  The live chat's own renderer, unchanged and given the same line
+                                  shape it is given live. Nothing here re-implements a conversation:
+                                  a record that drew one differently from the live view would be a
+                                  second, quietly diverging opinion about what an agent said.
+                                -->
+                                <div class="replay">
+                                  <app-conversation [items]="conversation().items" />
+                                </div>
+                              }
+                            }
+                          }
+                        }
+                      </li>
+                    }
+                  </ul>
+                }
+              }
+            }
+          </section>
         } @else if (state.kind === 'error' && state.status === 404) {
           <h1>No such workspace here</h1>
           <p class="explain">
