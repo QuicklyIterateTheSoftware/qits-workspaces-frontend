@@ -1,86 +1,86 @@
 <main class="page">
   <header>
-    <p class="eyebrow">{{ projectSlug() || 'No project' }}</p>
+    <p class="eyebrow">{{ projectSlug() || 'Every project' }}</p>
     <h1>Editor</h1>
-    <p class="intro">
-      A browser VS Code for this project, running in its workspace container. It answers on its own
-      address, so opening it leaves this application.
-    </p>
+    @if (projectSlug(); as project) {
+      <p class="intro">
+        A browser VS Code for the whole platform, opened at <code>{{ project }}</code
+        >'s checkout. It answers on its own address, so opening it leaves this application.
+      </p>
+    } @else {
+      <p class="intro">
+        A browser VS Code for the whole platform, with every project's checkout side by side in it.
+        It answers on its own address, so opening it leaves this application.
+      </p>
+    }
   </header>
 
-  @if (!scoped()) {
-    <p class="note" role="status">
-      The editor belongs to a project. Pick one in the header, or open this page under a project —
-      <code>/&lt;project&gt;/editor</code> — and it will be started there.
+  <app-async
+    [state]="session()"
+    loadingLabel="Starting the editor"
+    errorLabel="Could not start the editor"
+    (retry)="retry()"
+  />
+
+  @if (leaving()) {
+    <p class="wait" role="status">
+      Opening the editor at <code>{{ editorUrl() }}</code
+      >…
     </p>
-  } @else {
-    <app-async
-      [state]="session()"
-      loadingLabel="Starting the editor"
-      errorLabel="Could not start the editor"
-      (retry)="retry()"
-    />
+    <p class="note">Nothing happening? <a [href]="editorUrl()">Open it directly</a>.</p>
+  } @else if (stopped()) {
+    <p class="wait" role="status">
+      The container is stopped, and with it the editor. Nothing was lost: the branch is on the git
+      host and the container is a cache of it.
+    </p>
+    <qits-button variant="primary" (pressed)="retry()">Start the editor</qits-button>
+  } @else if (ended()) {
+    <p class="wait" role="alert">
+      The editor session ended inside a container that is still up. It does not come back on its own
+      — starting it again is a press.
+    </p>
+    <qits-button variant="primary" (pressed)="retry()">Start it again</qits-button>
+  } @else if (session().kind === 'loading' || session().kind === 'ready') {
+    <p class="wait" role="status">{{ waitLabel() }}</p>
+    @if (editorUrl(); as url) {
+      <p class="note">
+        You will be sent to <code>{{ url }}</code> as soon as it answers.
+      </p>
+    } @else {
+      <p class="note">
+        Waiting for the platform to state where the environment is served — the editor's address is
+        composed from the navigation document's origin, which has not answered yet.
+      </p>
+    }
+  }
 
-    @if (leaving()) {
-      <p class="wait" role="status">
-        Opening the editor at <code>{{ editorUrl() }}</code
-        >…
+  @if (workspaceId(); as workspace) {
+    <section class="verbs" aria-label="Container">
+      <h2>The container</h2>
+      <p class="note">
+        The editor rides workspace <code>{{ workspace }}</code
+        >, which is shared: stopping or recreating it affects everybody in it, and the editor is not
+        the only thing running there.
       </p>
-      <p class="note">Nothing happening? <a [href]="editorUrl()">Open it directly</a>.</p>
-    } @else if (stopped()) {
-      <p class="wait" role="status">
-        The container is stopped, and with it the editor. Nothing was lost: the branch is on the git
-        host and the container is a cache of it.
-      </p>
-      <qits-button variant="primary" (pressed)="retry()">Start the editor</qits-button>
-    } @else if (ended()) {
-      <p class="wait" role="alert">
-        The editor session ended inside a container that is still up. It does not come back on its
-        own — starting it again is a press.
-      </p>
-      <qits-button variant="primary" (pressed)="retry()">Start it again</qits-button>
-    } @else if (session().kind === 'loading' || session().kind === 'ready') {
-      <p class="wait" role="status">{{ waitLabel() }}</p>
-      @if (editorUrl(); as url) {
-        <p class="note">
-          You will be sent to <code>{{ url }}</code> as soon as it answers.
-        </p>
-      } @else {
-        <p class="note">
-          Waiting for the platform to state where the environment is served — the editor's address
-          is composed from the navigation document's origin, which has not answered yet.
-        </p>
+      <div class="row">
+        <qits-button
+          variant="secondary"
+          [busy]="pending() === 'stop'"
+          [disabled]="pending() !== null"
+          (pressed)="stop()"
+          >Stop</qits-button
+        >
+        <qits-button
+          variant="secondary"
+          [busy]="pending() === 'recreate'"
+          [disabled]="pending() !== null"
+          (pressed)="recreate()"
+          >Recreate</qits-button
+        >
+      </div>
+      @if (problem(); as refusal) {
+        <p class="refusal" role="alert">{{ refusal }}</p>
       }
-    }
-
-    @if (workspaceId(); as workspace) {
-      <section class="verbs" aria-label="Container">
-        <h2>The container</h2>
-        <p class="note">
-          The editor rides workspace <code>{{ workspace }}</code
-          >, which is shared: stopping or recreating it affects everybody in it, and the editor is
-          not the only thing running there.
-        </p>
-        <div class="row">
-          <qits-button
-            variant="secondary"
-            [busy]="pending() === 'stop'"
-            [disabled]="pending() !== null"
-            (pressed)="stop()"
-            >Stop</qits-button
-          >
-          <qits-button
-            variant="secondary"
-            [busy]="pending() === 'recreate'"
-            [disabled]="pending() !== null"
-            (pressed)="recreate()"
-            >Recreate</qits-button
-          >
-        </div>
-        @if (problem(); as refusal) {
-          <p class="refusal" role="alert">{{ refusal }}</p>
-        }
-      </section>
-    }
+    </section>
   }
 </main>

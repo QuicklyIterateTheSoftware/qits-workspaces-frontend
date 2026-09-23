@@ -11,7 +11,6 @@ import {
   type QitsScopeSource,
   QITS_NAVIGATION,
   type QitsNavigationSource,
-  type QitsNavTree,
 } from '@qits/ui-components';
 import type { EditorSessionDto } from '../api/dto';
 import { routes } from '../app.routes';
@@ -27,13 +26,21 @@ import { BROWSER_LOCATION, type BrowserLocation } from './editor-origin';
  * because a hand-off to an origin that is not up yet is a browser error page with no way back. Both
  * are silent when they regress: a page that tore the container down on leave, or one that
  * handed off a second early, looks identical in every screenshot.
+ *
+ * **The door names no project, and that is pinned rather than assumed.** There is one editor for
+ * the platform now, so every request here is asserted to carry no `repositoryId` anywhere — and an
+ * unscoped visit, which used to be the case that asked for nothing at all, is the case that proves
+ * it.
  */
 describe('EditorPage', () => {
   let http: HttpTestingController;
   let fixture: ComponentFixture<EditorPage>;
   let assigned: string[];
 
-  const ENSURE_URL = '/workspaces/api/editor/ensure?repositoryId=qits-qits';
+  const ENSURE_URL = '/workspaces/api/editor/ensure';
+
+  /** The shared editor's own address, composed from the stated origin and from nothing else. */
+  const EDITOR = 'https://editor.dev.wohlben.eu/';
 
   const session = (over: Partial<EditorSessionDto> = {}): EditorSessionDto => ({
     workspaceId: '7',
@@ -65,10 +72,7 @@ describe('EditorPage', () => {
    * The navigation document, as the shell would hold it: the platform's origin statements and
    * nothing else. Both are set and they differ, which is what makes the assertions below say which
    * one the page composes against — `projectOrigin`, the one that always spells the environment
-   * label, because the editor is a four-label host.
-   *
-   * `projectOrigin` is cast in for the same reason the page widens it: the edge serves the field,
-   * the typed one lands with the next @qits/ui-components release.
+   * label, because the editor's host carries it on every environment.
    */
   const navigationSource: QitsNavigationSource = {
     tree: signal({
@@ -77,7 +81,7 @@ describe('EditorPage', () => {
       environmentOrigin: 'https://wohlben.eu',
       apiDocs: {},
       legacy: undefined,
-    } as QitsNavTree),
+    }),
     failed: signal(false),
   };
 
@@ -88,9 +92,13 @@ describe('EditorPage', () => {
         provideLocationMocks(),
         provideHttpClient(),
         provideHttpClientTesting(),
-        // The chrome's answer for the scoped project: the wrapper is the row the editor rides.
+        // The chrome's repository listing, carrying the wrapper row: its *name* is the directory
+        // the scoped project's checkout sits in inside the one shared editor.
         provideQitsRepositoryList(
-          [{ id: 'qits-ci', name: 'qits-ci', category: 'services' }],
+          [
+            { id: 'qits-ci', name: 'qits-ci', category: 'services' },
+            { id: 'qits-qits', name: 'qits-qits', category: 'services' },
+          ],
           'qits-qits',
         ),
         { provide: BROWSER_LOCATION, useValue: browser },
@@ -123,6 +131,18 @@ describe('EditorPage', () => {
     fixture.detectChanges();
   }
 
+  /**
+   * The door, and the assertion every call site would otherwise repeat: it names no project. A
+   * `repositoryId` reappearing anywhere on the request is the regression this guards.
+   */
+  function expectEnsure(): ReturnType<HttpTestingController['expectOne']> {
+    const request = http.expectOne(ENSURE_URL);
+    expect(request.request.params.keys()).toEqual([]);
+    expect(request.request.urlWithParams).toBe(ENSURE_URL);
+    expect(request.request.body).toEqual({});
+    return request;
+  }
+
   function text(): string {
     return (fixture.nativeElement as HTMLElement).textContent ?? '';
   }
@@ -141,28 +161,26 @@ describe('EditorPage', () => {
   async function open(answer: EditorSessionDto = session()): Promise<void> {
     configure(scopeSource({ project: 'qits' }));
     await settle();
-    http.expectOne(ENSURE_URL).flush(answer);
+    expectEnsure().flush(answer);
     await settle();
   }
 
-  it('asks the door on entry, once, scoped to the project’s wrapper repository', async () => {
+  it('asks the door on entry, once, naming no project at all', async () => {
     configure(scopeSource({ project: 'qits' }));
     await settle();
 
-    const request = http.expectOne(ENSURE_URL);
+    const request = expectEnsure();
     expect(request.request.method).toBe('POST');
-    expect(request.request.body).toEqual({});
     request.flush(session());
     await settle();
   });
 
-  it('asks for the project’s wrapper even where the address names a repository', async () => {
-    // The editor is one per project and rides the aggregate workspace; the repository segment says
-    // which page the reader came in through, not which editor this is.
+  it('asks the same unscoped door even where the address names a repository', async () => {
+    // There is one editor; what the address names decides a folder and never a request.
     configure(scopeSource({ project: 'qits', group: 'qits-ci', repository: 'qits-ci' }));
     await settle();
 
-    http.expectOne(ENSURE_URL).flush(session());
+    expectEnsure().flush(session());
     await settle();
   });
 
@@ -171,10 +189,10 @@ describe('EditorPage', () => {
 
     expect(assigned).toEqual([]);
     expect(text()).toContain('Starting the container');
-    expect(text()).toContain('https://editor.qits.dev.wohlben.eu/');
+    expect(text()).toContain(EDITOR);
 
     vi.advanceTimersByTime(2_000);
-    http.expectOne(ENSURE_URL).flush(session());
+    expectEnsure().flush(session());
     await settle();
 
     expect(assigned).toEqual([]);
@@ -186,14 +204,26 @@ describe('EditorPage', () => {
     expect(assigned).toEqual([]);
 
     vi.advanceTimersByTime(2_000);
-    http.expectOne(ENSURE_URL).flush(session({ editorState: 'RUNNING', editorReady: true }));
+    expectEnsure().flush(session({ editorState: 'RUNNING', editorReady: true }));
     await settle();
 
-    expect(assigned).toEqual(['https://editor.qits.dev.wohlben.eu/']);
+    expect(assigned).toEqual([`${EDITOR}?folder=${encodeURIComponent('/workspace/qits-qits')}`]);
 
     // The poll is over: a ready editor is asked for nothing more.
     vi.advanceTimersByTime(10_000);
     await settle();
+  });
+
+  it('opens a scoped visit at that project’s folder inside the one shared editor', async () => {
+    // Same origin as the unscoped visit below — the project is a `?folder=`, not a host. The
+    // folder is the wrapper repository's NAME, which is the directory the container clones into.
+    await open();
+
+    vi.advanceTimersByTime(2_000);
+    expectEnsure().flush(session({ editorState: 'RUNNING', editorReady: true }));
+    await settle();
+
+    expect(assigned).toEqual(['https://editor.dev.wohlben.eu/?folder=%2Fworkspace%2Fqits-qits']);
   });
 
   it('deletes nothing on the way out — the editor rides a container somebody else is in', async () => {
@@ -215,7 +245,7 @@ describe('EditorPage', () => {
     await settle();
 
     await press('Start it again');
-    http.expectOne(ENSURE_URL).flush(session());
+    expectEnsure().flush(session());
     await settle();
 
     expect(text()).toContain('Starting the editor…');
@@ -224,15 +254,16 @@ describe('EditorPage', () => {
   it('reports a refused door in the service’s words, with a Retry that asks again', async () => {
     configure(scopeSource({ project: 'qits' }));
     await settle();
-    http
-      .expectOne(ENSURE_URL)
-      .flush({ message: 'no wrapper workspace' }, { status: 503, statusText: 'Unavailable' });
+    expectEnsure().flush(
+      { message: 'no wrapper workspace' },
+      { status: 503, statusText: 'Unavailable' },
+    );
     await settle();
 
     expect(text()).toContain('Could not start the editor — 503 no wrapper workspace');
 
     await press('Retry');
-    http.expectOne(ENSURE_URL).flush(session());
+    expectEnsure().flush(session());
     await settle();
   });
 
@@ -250,7 +281,7 @@ describe('EditorPage', () => {
     await settle();
 
     await press('Start the editor');
-    http.expectOne(ENSURE_URL).flush(session());
+    expectEnsure().flush(session());
     await settle();
   });
 
@@ -264,7 +295,7 @@ describe('EditorPage', () => {
     await settle();
 
     vi.advanceTimersByTime(2_000);
-    http.expectOne(ENSURE_URL).flush(session());
+    expectEnsure().flush(session());
     await settle();
   });
 
@@ -285,15 +316,23 @@ describe('EditorPage', () => {
 
     // The wait goes on: a refused recreate changed nothing about the editor coming up.
     vi.advanceTimersByTime(2_000);
-    http.expectOne(ENSURE_URL).flush(session());
+    expectEnsure().flush(session());
     await settle();
   });
 
-  it('asks for nothing at all with no project scoped, and says which address would have one', async () => {
+  it('yields an editor with no project scoped at all, at the bare shared origin', async () => {
+    // The inverse of the rule this page shipped with, and the reason the suite exists in this
+    // shape: unscoped used to mean "no editor to ask for". It is now the ordinary case — the door
+    // is asked naming nothing, and the hand-off lands on the editor's own address with no folder,
+    // because there is no project whose checkout to open at.
     configure(scopeSource({}));
     await settle();
 
-    expect(text()).toContain('/<project>/editor');
+    expectEnsure().flush(session({ editorState: 'RUNNING', editorReady: true }));
+    await settle();
+
+    expect(assigned).toEqual([EDITOR]);
+
     vi.advanceTimersByTime(10_000);
     await settle();
   });

@@ -4,18 +4,10 @@ import {
   Component,
   DestroyRef,
   computed,
-  effect,
   inject,
   signal,
-  untracked,
 } from '@angular/core';
-import {
-  QITS_NAVIGATION,
-  QITS_REPOSITORIES,
-  QITS_SCOPE,
-  QitsButton,
-  type QitsNavTree,
-} from '@qits/ui-components';
+import { QITS_NAVIGATION, QITS_REPOSITORIES, QITS_SCOPE, QitsButton } from '@qits/ui-components';
 import type { EditorSessionDto } from '../api/dto';
 import { WorkspacesApi } from '../api/workspaces-api';
 import { Async } from '../ui/async';
@@ -38,11 +30,11 @@ export const EDITOR_POLL_MS = 2_000;
 type Pending = 'stop' | 'recreate' | null;
 
 /**
- * The editor: a browser VS Code for this project, and the wait while it comes up.
+ * The editor: the platform's browser VS Code, and the wait while it comes up.
  *
  * **The page is a door and a waiting room, and then it is gone.** The editor is
- * `openvscode-server` on its own origin — `https://editor.<slug>.<env>.<domain>/` — so the last thing
- * this component does is a *full* navigation out of the application. It is not an iframe and not a
+ * `openvscode-server` on its own origin — `https://editor.<env>.<domain>/` — so the last thing this
+ * component does is a *full* navigation out of the application. It is not an iframe and not a
  * route: the editor owns a whole origin, with its own service worker, its own history and its own
  * websockets, and a frame around it would buy nothing and cost all three.
  *
@@ -53,18 +45,18 @@ type Pending = 'stop' | 'recreate' | null;
  * status and the daemon's report, and `editorReady` is where that judgement lives. The states are
  * what the wait *says* while it is false.
  *
- * **Nothing is torn down on the way out.** The editor rides the project's shared workspace
- * container: somebody else may be in it, a coding agent may be running in it, and the reader
- * leaving this page is usually the reader *arriving* at the editor. So leaving cancels the poll and
- * ends there — no stop, no delete. The same rule the glances page states, for the same reason: a
- * shared instance is not this page's to end, and the one verb that ends it is a button somebody
- * presses.
+ * **Nothing is torn down on the way out.** The editor rides a shared container: somebody else may
+ * be in it, a coding agent may be running in it, and the reader leaving this page is usually the
+ * reader *arriving* at the editor. So leaving cancels the poll and ends there — no stop, no delete.
+ * The same rule the glances page states, for the same reason: a shared instance is not this page's
+ * to end, and the one verb that ends it is a button somebody presses.
  *
- * **The scope is the project, and the repository is the overview's rule reused.** The address names
- * a project — bare, `/qits/editor`, or under a repository — and the wrapper repository of that
- * project is the row an aggregate workspace branches, so it is the row the editor rides. Unscoped
- * there is no project and therefore no editor to ask for; the page says which address would have
- * one instead of firing a request that could only be a guess.
+ * **The door is unscoped, and the project scope is a folder convenience.** There is one editor for
+ * the whole platform, holding every project's wrapper cloned side by side at `/workspace/<repo>`,
+ * so the door is asked on arrival unconditionally and names nothing. That inverts the rule this
+ * page shipped with: a project in the address used to decide whether there was an editor to ask
+ * for at all, and now it decides only which directory the editor opens at — a `?folder=` appended
+ * to the hand-off. Unscoped is the ordinary case and gets the same editor.
  *
  * **Stop and Recreate are the two ways out of a stuck editor**, and they are the container verbs
  * the status strip already offers, aimed at the workspace the door named. Recreate is refused with
@@ -103,39 +95,58 @@ export class EditorPage {
   /** The hand-off has been made. The browser is leaving; nothing after it is worth drawing. */
   protected readonly leaving = signal(false);
 
-  /** The project the address names — whose editor this is, and what its origin is spelled with. */
+  /** The project the address names, if it names one — which folder the editor opens at. */
   protected readonly projectSlug = computed(() => this.qitsScope.scope().project);
 
   /**
-   * The repository the editor rides: the scoped project's **wrapper**, always.
+   * The **name** of the scoped project's wrapper repository, which is the directory that project's
+   * checkout sits in inside the shared editor — `/workspace/<name>`.
    *
-   * The overview's rule, with the one difference this page's subject makes. There, a repository in
-   * the address is the repository whose workspaces are listed; here there is one editor per project
-   * and it rides the aggregate workspace — which branches the wrapper and every submodule under it,
-   * so the wrapper is where a project's whole checkout is. A repository segment in the address
-   * therefore says which page you came in through and not which editor this is.
+   * The name and not the id, and not the project slug: the container clones each wrapper under the
+   * repository's own name, so project `qits` is at `/workspace/qits-qits`. Which row that is, is
+   * the overview's rule reused — the wrapper is the row an aggregate workspace branches, and so the
+   * row holding a project's whole checkout, submodules and all. A repository segment in the address
+   * says which page the reader came in through and never which directory this is.
    *
-   * `undefined` until the chrome's repository listing answers, which is why the door is fired from
-   * an effect rather than from a line in the constructor.
+   * `undefined` while the chrome's repository listing has not answered, and for a wrapper it does
+   * not carry a row for. Both are non-events here: the folder is a convenience, so its absence
+   * costs the reader a `cd` and nothing else — see {@link editorUrl}.
    */
-  protected readonly repositoryId = computed(() =>
-    this.qitsScope.scope().project ? this.qitsRepositories.wrapperRepositoryId() : undefined,
-  );
-
-  /** Where the reader is being sent, or null while the platform has not stated its origin yet. */
-  protected readonly editorUrl = computed(() => {
-    const slug = this.projectSlug();
-    // `projectOrigin` is read through a widening because the field is served by the edge today but
-    // is not on `QitsNavTree` in the released @qits/ui-components — the typed field lands with the
-    // next release, and this cast goes with it. Never a fabricated value: absent, the composition
-    // falls back to `environmentOrigin` inside `editorOrigin`.
-    const tree = this.navigation?.tree() as
-      (QitsNavTree & { readonly projectOrigin?: string }) | undefined;
-    return slug ? editorOrigin(tree?.projectOrigin, tree?.environmentOrigin, slug) : null;
+  protected readonly wrapperRepositoryName = computed(() => {
+    if (!this.qitsScope.scope().project) {
+      return undefined;
+    }
+    const wrapperId = this.qitsRepositories.wrapperRepositoryId();
+    if (!wrapperId) {
+      return undefined;
+    }
+    return this.qitsRepositories.repositories()?.find((row) => row.id === wrapperId)?.name;
   });
 
-  /** Whether the address states a project at all. Unscoped, this page has no subject. */
-  protected readonly scoped = computed(() => this.projectSlug() !== undefined);
+  /**
+   * Where the reader is being sent, or null while the platform has not stated its origin yet.
+   *
+   * The origin is the platform's one shared editor. A `?folder=` is appended when the address names
+   * a project *and* its wrapper's name is known, so the editor opens at that project's checkout
+   * instead of at the container's root.
+   *
+   * **The folder is a convenience and never a gate.** A listing that has not answered, or that
+   * carries no row for the wrapper, sends the reader to the bare origin rather than making them
+   * wait: being in the editor one directory up beats being on this page, and every project is
+   * there to open by hand anyway.
+   */
+  protected readonly editorUrl = computed(() => {
+    const origin = editorOrigin(
+      this.navigation?.tree()?.projectOrigin,
+      this.navigation?.tree()?.environmentOrigin,
+    );
+    if (!origin) {
+      return null;
+    }
+    const name = this.wrapperRepositoryName();
+    // `editorOrigin` ends in `/`, so the query goes straight on the end.
+    return name ? `${origin}?folder=${encodeURIComponent(`/workspace/${name}`)}` : origin;
+  });
 
   /** The editor ran and stopped. A waiting state would wait forever, so it is its own surface. */
   protected readonly ended = computed(() => this.answer()?.editorState === 'ENDED');
@@ -165,22 +176,12 @@ export class EditorPage {
   /** The next poll, when one is armed. Cleared on the way out — see the class note. */
   private timer: ReturnType<typeof setTimeout> | null = null;
 
-  /** The repository the door was fired for, so a settling scope asks once and not per tick. */
-  private asked: string | undefined = undefined;
-
   private handedOff = false;
 
   constructor() {
-    // The scope resolves a moment after the first paint — the slug becomes a repository id only
-    // once the chrome's listings answer — so the door follows it rather than being fired blind.
-    effect(() => {
-      const repositoryId = this.repositoryId();
-      untracked(() => {
-        if (!repositoryId || repositoryId === this.asked) return;
-        this.asked = repositoryId;
-        void this.ensure(repositoryId);
-      });
-    });
+    // Fired once, here, and not from an effect watching the scope: the door names nothing, so there
+    // is no listing to wait for and nothing that could make the request a guess.
+    void this.ensure();
 
     // Cancel the poll, and do nothing else. The editor is shared and outlives this page.
     inject(DestroyRef).onDestroy(() => this.cancelPoll());
@@ -188,11 +189,9 @@ export class EditorPage {
 
   /** Ask again from the top: what Retry presses, and what Start after a stop presses. */
   protected retry(): void {
-    const repositoryId = this.repositoryId();
-    if (!repositoryId) return;
     this.stopped.set(false);
     this.problem.set(null);
-    void this.ensure(repositoryId);
+    void this.ensure();
   }
 
   /**
@@ -245,13 +244,13 @@ export class EditorPage {
   }
 
   /** One round of the door, and whatever the answer implies: hand off, stop, or ask again. */
-  private async ensure(repositoryId: string): Promise<void> {
+  private async ensure(): Promise<void> {
     this.cancelPoll();
     if (this.session().kind !== 'ready') {
       this.session.set(LOADING);
     }
     try {
-      const answer = await this.api.ensureEditor(repositoryId);
+      const answer = await this.api.ensureEditor();
       this.session.set(ready(answer));
       if (answer.editorReady) {
         if (this.editorUrl()) {
@@ -260,13 +259,13 @@ export class EditorPage {
         }
         // Ready, but the navigation document has stated no origin to compose against yet — the
         // address is composed from it, so ask again shortly rather than stranding the reader.
-        this.schedule(repositoryId);
+        this.schedule();
         return;
       }
       // An ended editor is not a slow one. Waiting on it would wait forever, so the poll stops and
       // the surface offers the press that starts a new one.
       if (answer.editorState !== 'ENDED') {
-        this.schedule(repositoryId);
+        this.schedule();
       }
     } catch (error) {
       this.session.set(failed(error));
@@ -282,18 +281,17 @@ export class EditorPage {
     this.browser.assign(url);
   }
 
-  private schedule(repositoryId: string): void {
+  private schedule(): void {
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.ensure(repositoryId);
+      void this.ensure();
     }, EDITOR_POLL_MS);
   }
 
   /** Pick the wait back up where a verb interrupted it, unless it has nothing left to wait for. */
   private resume(): void {
-    const repositoryId = this.repositoryId();
-    if (!repositoryId || this.stopped() || this.handedOff) return;
-    this.schedule(repositoryId);
+    if (this.stopped() || this.handedOff) return;
+    this.schedule();
   }
 
   private cancelPoll(): void {

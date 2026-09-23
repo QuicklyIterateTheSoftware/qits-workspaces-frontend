@@ -165,23 +165,22 @@ export class WorkspacesApi {
   }
 
   /**
-   * Find or start this project's editor, and say whether it answers yet.
+   * Find or start the platform's editor, and say whether it answers yet.
    *
    * **One door for both**, because the request is the same sentence either way: "there should be an
    * editor here". A fresh one answers `201` and an existing one `200`, with the same body — so the
    * caller polls this and nothing else, and a reader who reloads mid-start rejoins the editor that
    * is already coming up instead of asking for a second one.
    *
-   * **The scope is the wrapper repository, sent the way the listing sends its own**: as a query
-   * parameter on a collection-level route, because a workspace is not a sub-resource of a
-   * repository here — qits-workspaces holds the id as an opaque string. Which repository that is,
-   * is the overview's rule reused: a project's editor rides the workspace of the row an aggregate
-   * workspace branches. The body is empty; everything this door needs is the scope.
+   * **The door is unscoped, and that is the whole change from the generation before it.** There is
+   * one shared editor for the platform rather than one per project: every project's wrapper is
+   * cloned side by side in the single container behind it, so there is nothing for a caller to name
+   * — no `repositoryId`, no project, and an empty body. Which project a reader lands in is decided
+   * after the hand-off, by a `?folder=` on the editor's own address, and never by this request.
    */
-  async ensureEditor(repositoryId: string): Promise<EditorSessionDto> {
-    const params = new HttpParams().set('repositoryId', repositoryId);
+  async ensureEditor(): Promise<EditorSessionDto> {
     return firstValueFrom(
-      this.http.post<EditorSessionDto>(`${this.base}/workspaces/api/editor/ensure`, {}, { params }),
+      this.http.post<EditorSessionDto>(`${this.base}/workspaces/api/editor/ensure`, {}),
     );
   }
 

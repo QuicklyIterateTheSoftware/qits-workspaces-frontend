@@ -164,8 +164,12 @@ export interface ContainerProcessResponse {
 export type EditorState = 'STARTING' | 'RUNNING' | 'ENDED';
 
 /**
- * What `POST /workspaces/api/editor/ensure` answers: the workspace carrying this project's editor,
- * what its container is doing, and the one field a caller acts on.
+ * What `POST /workspaces/api/editor/ensure` answers: the workspace carrying the platform's one
+ * shared editor, what its container is doing, and the one field a caller acts on.
+ *
+ * The door names no project — there is a single editor for the whole platform, holding every
+ * project's wrapper side by side — so this body is the same body for every caller, and a request
+ * that carried a scope would be answering a question nobody asks any more.
  *
  * **`editorReady` is the readiness, and the two states are not it.** A caller that waited for
  * `editorState === 'RUNNING'` would be deciding for itself when the editor answers requests; the

@@ -18,12 +18,14 @@ import { WorkspacesPage } from './overview/workspaces-page';
  * id is the generated one every route addresses, never the branch-derived label — the label is
  * unique only among active workspaces in one repository and is reusable once one resolves.
  *
- * **`editor` is a project's page and names nothing else**, which is why it is a bare literal beside
- * the other two rather than a segment under a repository. The editor is one per project, riding the
- * workspace of that project's wrapper, so the address it needs is the scope every route here
- * already carries — `/qits/editor` — and a repository in it would be a second answer to a question
- * the project already settled. It joins the closed vocabulary of first segments below, so no
- * project may be called `editor`, exactly as none may be called `repositories`.
+ * **`editor` names nothing but itself**, which is why it is a bare literal beside the other two
+ * rather than a segment under a repository. There is one editor for the whole platform — a single
+ * container holding every project's wrapper side by side — so the page needs no scope to have a
+ * subject, and `/editor` is the plain address of it. A project in front, `/qits/editor`, is a
+ * convenience and not a second subject: it opens the same editor at that project's folder, and a
+ * repository segment on top of that would be a third answer to a question the project already
+ * settled. The literal joins the closed vocabulary of first segments below, so no project may be
+ * called `editor`, exactly as none may be called `repositories`.
  *
  * **Which tab is open rides in `?tab=`, not in a trailing segment.** A trailing segment would make a
  * tab switch free (Angular reuses a component across a parameter change) and would make a *workspace*
