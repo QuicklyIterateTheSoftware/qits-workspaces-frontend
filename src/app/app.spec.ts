@@ -5,13 +5,16 @@ import { provideLocationMocks } from '@angular/common/testing';
 import { provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import {
-  provideQitsNavigationLinks,
+  provideQitsNavigationTree,
   type QitsNavLink,
   provideQitsRepositoryList,
   provideQitsScope,
 } from '@qits/ui-components';
 import { App } from './app';
 import { routes } from './app.routes';
+
+/** Where the fixture navigation says qits-projects answers — its own host, not this one. */
+const PROJECTS_ORIGIN = 'https://projects.qits.example';
 
 /**
  * The shell owns one thing — the outlet — so that is what is asserted here, plus the route table
@@ -51,7 +54,10 @@ describe('App', () => {
         // is the unscoped page these specs are about.
         provideQitsRepositoryList([]),
         provideQitsScope('repository'),
-        provideQitsNavigationLinks(NAV),
+        provideQitsNavigationTree({
+          links: NAV,
+          applications: { 'qits-projects': { origin: PROJECTS_ORIGIN } },
+        }),
       ],
     });
     http = TestBed.inject(HttpTestingController);
@@ -68,7 +74,7 @@ describe('App', () => {
 
   it('routes the root URL to the workspace overview inside the shared layout', async () => {
     const harness = await RouterTestingHarness.create('/');
-    http.expectOne('/projects/api/projects').flush({ entries: [] });
+    http.expectOne(`${PROJECTS_ORIGIN}/projects/api/projects`).flush({ entries: [] });
     await harness.fixture.whenStable();
 
     const layout = harness.routeNativeElement;
