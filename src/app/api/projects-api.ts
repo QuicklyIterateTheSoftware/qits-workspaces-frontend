@@ -1,7 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
+import { QitsAppLinks } from '@qits/ui-components';
 import { firstValueFrom } from 'rxjs';
-import { QITS_API_BASE } from './api-base';
 import type {
   BranchDto,
   BranchesResponse,
@@ -29,16 +29,29 @@ export interface ProjectComponents {
  * lines, and the alternative — putting it in `@qits/ui-components` — would push a transport
  * dependency into seven SPAs that make no requests, and turn every change to it into a library
  * publish plus a version bump in eight applications.
+ *
+ * qits-projects answers on its own host, not this one: the edge routes an application's paths on
+ * that application's host only. So every call here goes to `applications['qits-projects'].origin`
+ * from the edge's `/main-navigation`, carries the session (`withCredentials` — the edge answers
+ * credentialed CORS for any origin under the platform domain), and waits for the navigation to
+ * answer rather than firing a relative path at this host first. Where the navigation names no
+ * origin the path stays relative, same-origin — what an older edge still routes.
  */
 @Injectable({ providedIn: 'root' })
 export class ProjectsApi {
   private readonly http = inject(HttpClient);
-  private readonly base = inject(QITS_API_BASE);
+  private readonly links = inject(QitsAppLinks);
+
+  /** `path` on qits-projects' own origin, once the navigation has said where that is. */
+  private url(path: string): Promise<string> {
+    return this.links.whenApiUrl('qits-projects', path);
+  }
 
   /** Every project. One request, on page load. */
   async projects(): Promise<readonly ProjectDto[]> {
+    const url = await this.url('/projects/api/projects');
     const response = await firstValueFrom(
-      this.http.get<ProjectEntriesResponse>(`${this.base}/projects/api/projects`),
+      this.http.get<ProjectEntriesResponse>(url, { withCredentials: true }),
     );
     return response.entries.map((entry) => entry.project);
   }
@@ -55,10 +68,9 @@ export class ProjectsApi {
    * aggregate one. `wrapper` is null for a project that has none.
    */
   async components(projectId: string): Promise<ProjectComponents> {
+    const url = await this.url(`/projects/api/projects/${encodeURIComponent(projectId)}/repositories`);
     const response = await firstValueFrom(
-      this.http.get<RepositoryEntriesResponse>(
-        `${this.base}/projects/api/projects/${encodeURIComponent(projectId)}/repositories`,
-      ),
+      this.http.get<RepositoryEntriesResponse>(url, { withCredentials: true }),
     );
     return {
       repositories: response.entries.map((entry) => entry.repository),
@@ -79,10 +91,9 @@ export class ProjectsApi {
    * {@link repositories} — it is the only way in from a deep link.
    */
   async repository(repositoryId: string): Promise<RepositoryDto> {
+    const url = await this.url(`/projects/api/repositories/${encodeURIComponent(repositoryId)}`);
     const response = await firstValueFrom(
-      this.http.get<RepositoryResponse>(
-        `${this.base}/projects/api/repositories/${encodeURIComponent(repositoryId)}`,
-      ),
+      this.http.get<RepositoryResponse>(url, { withCredentials: true }),
     );
     return response.repository;
   }
@@ -99,10 +110,11 @@ export class ProjectsApi {
    * holds up the rest of the page.
    */
   async branches(repositoryId: string): Promise<readonly BranchDto[]> {
+    const url = await this.url(
+      `/projects/api/repositories/${encodeURIComponent(repositoryId)}/branches`,
+    );
     const response = await firstValueFrom(
-      this.http.get<BranchesResponse>(
-        `${this.base}/projects/api/repositories/${encodeURIComponent(repositoryId)}/branches`,
-      ),
+      this.http.get<BranchesResponse>(url, { withCredentials: true }),
     );
     return response.branches ?? [];
   }

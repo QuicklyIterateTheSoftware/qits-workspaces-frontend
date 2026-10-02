@@ -1,15 +1,17 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
+import { QitsAppLinks } from '@qits/ui-components';
 import { firstValueFrom } from 'rxjs';
-import { QITS_API_BASE } from './api-base';
 
 /**
  * qits-stt: one route, one field in, one field out.
  *
- * `POST /stt/api/transcriptions` takes `{audioBase64}` and answers `{text}`. It is a third service
- * this page talks to and it needs nothing special to reach: the SPA is served at `/workspaces/`
- * behind the same gateway that serves `/stt/`, so the session cookie rides a same-origin absolute
- * path with no CORS and no machine token — the same reason {@link QITS_API_BASE} is empty.
+ * `POST /stt/api/transcriptions` takes `{audioBase64}` and answers `{text}`. qits-stt has its own
+ * host (`stt.<domain>`) and the edge no longer routes its paths on this one, so the call goes to
+ * `applications['qits-stt'].origin` from the edge's `/main-navigation`, waits for the navigation to
+ * answer, and carries the session itself (`withCredentials` — the edge answers credentialed CORS for
+ * any origin under the platform domain). Where the navigation names no origin the path stays
+ * relative, same-origin — what an older edge still routes.
  *
  * **The bytes must be a WAV.** The service decodes the base64, writes it to a `.wav` file and hands
  * the path to a resident python worker; any common PCM rate is fine because the model resamples, but
@@ -22,7 +24,7 @@ import { QITS_API_BASE } from './api-base';
 @Injectable({ providedIn: 'root' })
 export class SpeechApi {
   private readonly http = inject(HttpClient);
-  private readonly base = inject(QITS_API_BASE);
+  private readonly links = inject(QitsAppLinks);
 
   /**
    * Transcribe one WAV clip.
@@ -34,8 +36,9 @@ export class SpeechApi {
    * than a constraint name.
    */
   async transcribe(audioBase64: string): Promise<string> {
+    const url = await this.links.whenApiUrl('qits-stt', '/stt/api/transcriptions');
     const answer = await firstValueFrom(
-      this.http.post<{ text?: string }>(`${this.base}/stt/api/transcriptions`, { audioBase64 }),
+      this.http.post<{ text?: string }>(url, { audioBase64 }, { withCredentials: true }),
     );
     return answer.text ?? '';
   }
