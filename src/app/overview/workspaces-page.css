@@ -19,6 +19,14 @@ h1 {
   margin: 0;
   font-size: 2.25rem;
 }
+.title {
+  display: flex;
+  align-items: baseline;
+  gap: 1.25rem;
+}
+.runners-link {
+  font-size: 0.9rem;
+}
 h2 {
   margin: 0 0 1rem;
   font-size: 1.05rem;

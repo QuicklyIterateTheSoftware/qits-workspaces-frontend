@@ -1,0 +1,362 @@
+<header class="head">
+  <h1>Runners</h1>
+  <p class="lede">
+    The nodes a workspace can be placed on, each installed with one pasted line — estate-wide, not
+    one project's.
+  </p>
+</header>
+
+@if (panel(); as install) {
+  <section class="panel" role="alert" aria-label="Install line">
+    <h2>Install line — {{ install.runnerName }}</h2>
+    <p>Paste this into a terminal on the node, which needs docker. Nothing else is needed.</p>
+    <p class="once">
+      This is the only time it is shown: the token inside it is single-use, and reloading this page
+      loses it for good. Rotate token in the runner's menu makes a new one.
+    </p>
+    <pre class="script install-line">{{ install.installLine }}</pre>
+    <div class="panel-actions">
+      <qits-button variant="primary" size="sm" (pressed)="copy('install', install.installLine)">
+        {{ copied() === 'install' ? 'Copied' : 'Copy install line' }}
+      </qits-button>
+    </div>
+    <p class="token-label">Registration token</p>
+    <pre class="script token">{{ install.registrationToken }}</pre>
+    <div class="panel-actions">
+      <qits-button
+        variant="secondary"
+        size="sm"
+        (pressed)="copy('token', install.registrationToken)"
+      >
+        {{ copied() === 'token' ? 'Copied' : 'Copy token' }}
+      </qits-button>
+      <qits-button variant="ghost" size="sm" (pressed)="closePanel()">Close</qits-button>
+    </div>
+  </section>
+}
+
+@if (admin()) {
+  <section class="create">
+    <h2>Register a runner</h2>
+    <!-- novalidate: this page reports a bad field itself, rather than the browser cancelling the submit. -->
+    <form novalidate (submit)="$event.preventDefault(); createRunner()">
+      <label class="field">
+        <span>Name</span>
+        <input
+          type="text"
+          name="name"
+          [value]="newName()"
+          (input)="newName.set($any($event.target).value)"
+          placeholder="build-box-1"
+        />
+        @if (nameProblem()) {
+          <span class="field-error" role="alert">{{ nameProblem() }}</span>
+        }
+      </label>
+      <label class="field">
+        <span>Description (optional)</span>
+        <input
+          type="text"
+          name="description"
+          [value]="newDescription()"
+          (input)="newDescription.set($any($event.target).value)"
+        />
+      </label>
+      <label class="field field-narrow">
+        <span>Slots</span>
+        <input
+          type="number"
+          name="slots"
+          [min]="minSlots"
+          [value]="newSlots()"
+          (input)="newSlots.set($any($event.target).valueAsNumber)"
+        />
+        @if (slotsProblem()) {
+          <span class="field-error" role="alert">{{ slotsProblem() }}</span>
+        }
+      </label>
+      <qits-button variant="primary" size="sm" type="submit" [busy]="creating()">
+        Register
+      </qits-button>
+    </form>
+    @if (createError()) {
+      <p class="note note-error" role="alert">{{ createError() }}</p>
+    }
+  </section>
+}
+
+<section class="list">
+  <app-async
+    [state]="runners()"
+    loadingLabel="Loading runners"
+    errorLabel="Could not load runners"
+    (retry)="load()"
+  />
+
+  @if (runners(); as state) {
+    @if (state.kind === 'ready') {
+      @if (state.value.length === 0) {
+        <app-empty message="No runners are registered yet." />
+      }
+      <ul class="runners">
+        @for (runner of state.value; track runner.id) {
+          <li class="runner" [attr.data-runner]="runner.name">
+            <div class="row">
+              <span class="name">{{ runner.name }}</span>
+              <qits-badge
+                class="connectivity"
+                [label]="connectivity(runner).label"
+                [tone]="connectivity(runner).tone"
+              />
+              @if (runner.connected) {
+                <span class="fact seen">since {{ ago(runner.connectedSince) }}</span>
+              } @else {
+                <span class="fact seen">last seen {{ ago(runner.lastSeenAt) }}</span>
+              }
+              <span class="fact version">
+                @if (runner.version) {
+                  v{{ runner.version }}
+                } @else {
+                  version {{ none }}
+                }
+              </span>
+              @if (updating(runner)) {
+                <qits-badge
+                  class="updating"
+                  label="updating"
+                  tone="info"
+                  [attr.title]="'Rolling over to v' + runner.pinnedVersion"
+                />
+              }
+              <span class="fact slots">{{ runner.running }}/{{ runner.slots }} slots running</span>
+              <span class="fact owned">{{ runner.owned }} owned</span>
+              <span class="fact queued">{{ runner.queued }} queued</span>
+              @if (runner.quarantined) {
+                <qits-badge class="quarantined" label="quarantined" tone="warning" />
+                <span class="fact quarantine-reason">
+                  {{ quarantineReason(runner) }}, since {{ ago(runner.quarantinedAt) }}
+                </span>
+              }
+              @if (healthCheck(runner); as check) {
+                <qits-badge [label]="check.label" [tone]="check.tone" />
+                <span class="fact">{{ ago(runner.lastHealthCheckAt) }}</span>
+              }
+              <span class="spring"></span>
+              @if (admin()) {
+                <button
+                  type="button"
+                  class="menu-toggle"
+                  [attr.aria-expanded]="isRowOpen(runner.id)"
+                  (click)="toggleRow(runner.id)"
+                >
+                  Actions
+                </button>
+              }
+            </div>
+
+            @if (runner.description) {
+              <p class="description">{{ runner.description }}</p>
+            }
+
+            <section class="login" aria-label="Agent login">
+              <span class="login-title">Agent login on this node</span>
+              @if (runner.login; as login) {
+                <span class="harness">
+                  Claude
+                  <qits-badge
+                    class="presence-claude"
+                    [label]="presence(login.claude).label"
+                    [tone]="presence(login.claude).tone"
+                  />
+                </span>
+                <span class="harness">
+                  Kimi
+                  <qits-badge
+                    class="presence-kimi"
+                    [label]="presence(login.kimi).label"
+                    [tone]="presence(login.kimi).tone"
+                  />
+                </span>
+                <span class="fact checked">checked {{ ago(login.checkedAt) }}</span>
+              } @else {
+                <span class="fact">not reported yet</span>
+              }
+              @if (admin()) {
+                <qits-button
+                  class="recheck"
+                  variant="ghost"
+                  size="sm"
+                  [busy]="busy() === 'login:' + runner.id"
+                  (pressed)="recheckLogin(runner)"
+                >
+                  Re-check
+                </qits-button>
+              }
+              @if (runner.loginCommand || runner.kimiLoginCommand) {
+                <p class="login-hint">
+                  Log in once on the node; every workspace on this runner shares it. The platform
+                  never sees the secret.
+                </p>
+                @if (runner.loginCommand) {
+                  <div class="command">
+                    <code class="login-command">{{ runner.loginCommand }}</code>
+                    <qits-button
+                      variant="ghost"
+                      size="sm"
+                      (pressed)="copy('login:' + runner.id, runner.loginCommand)"
+                    >
+                      {{ copied() === 'login:' + runner.id ? 'Copied' : 'Copy' }}
+                    </qits-button>
+                  </div>
+                }
+                @if (runner.kimiLoginCommand) {
+                  <div class="command">
+                    <code class="kimi-login-command">{{ runner.kimiLoginCommand }}</code>
+                    <qits-button
+                      variant="ghost"
+                      size="sm"
+                      (pressed)="copy('kimi:' + runner.id, runner.kimiLoginCommand)"
+                    >
+                      {{ copied() === 'kimi:' + runner.id ? 'Copied' : 'Copy' }}
+                    </qits-button>
+                  </div>
+                }
+              } @else {
+                <p class="login-hint">
+                  The login command appears once the runner has reported its node volume.
+                </p>
+              }
+              @if (loginError().get(runner.id); as message) {
+                <p class="note note-error" role="alert">{{ message }}</p>
+              }
+            </section>
+
+            @if (admin() && isRowOpen(runner.id)) {
+              <div class="menu">
+                @if (editing(); as draft) {
+                  <div class="edit">
+                    <label class="field field-narrow">
+                      <span>Slots</span>
+                      <input
+                        type="number"
+                        name="edit-slots"
+                        [min]="minSlots"
+                        [value]="draft.slots"
+                        (input)="setEditSlots($any($event.target).valueAsNumber)"
+                      />
+                      <span class="field-hint">0 = take no new workspaces.</span>
+                    </label>
+                    <label class="field">
+                      <span>Description</span>
+                      <input
+                        type="text"
+                        name="edit-description"
+                        [value]="draft.description"
+                        (input)="setEditDescription($any($event.target).value)"
+                      />
+                    </label>
+                    <div class="menu-actions">
+                      <qits-button
+                        variant="primary"
+                        size="sm"
+                        [busy]="busy() === 'save'"
+                        (pressed)="saveEdit(runner)"
+                      >
+                        Save
+                      </qits-button>
+                      <qits-button variant="ghost" size="sm" (pressed)="cancelEdit()">
+                        Cancel
+                      </qits-button>
+                    </div>
+                  </div>
+                } @else {
+                  <div class="menu-actions">
+                    <qits-button variant="secondary" size="sm" (pressed)="startEdit(runner)">
+                      Edit slots/description
+                    </qits-button>
+                    <qits-button
+                      variant="secondary"
+                      size="sm"
+                      [busy]="busy() === 'rotate'"
+                      (pressed)="rotateToken(runner)"
+                    >
+                      Rotate token
+                    </qits-button>
+                    @if (runner.quarantined) {
+                      <qits-button
+                        variant="secondary"
+                        size="sm"
+                        [busy]="busy() === 'greenlight'"
+                        (pressed)="greenlight(runner)"
+                      >
+                        Greenlight
+                      </qits-button>
+                    }
+                    <qits-button
+                      variant="secondary"
+                      size="sm"
+                      [busy]="busy() === 'healthcheck'"
+                      (pressed)="runHealthCheck(runner)"
+                    >
+                      Run health check
+                    </qits-button>
+                    @if (confirmingDelete()) {
+                      <span class="menu-note">Delete this runner?</span>
+                      <qits-button
+                        variant="primary"
+                        size="sm"
+                        [busy]="busy() === 'delete'"
+                        (pressed)="confirmDelete(runner)"
+                      >
+                        Yes, delete it
+                      </qits-button>
+                      <qits-button variant="ghost" size="sm" (pressed)="dismissDelete()">
+                        Keep it
+                      </qits-button>
+                    } @else {
+                      <qits-button variant="secondary" size="sm" (pressed)="askDelete()">
+                        Delete
+                      </qits-button>
+                    }
+                  </div>
+                }
+                @if (owners(); as blocking) {
+                  <div class="note note-error owners" role="alert">
+                    <p>
+                      This runner still owns {{ blocking.length }}
+                      {{ blocking.length === 1 ? 'workspace' : 'workspaces' }}. A workspace is
+                      sticky to its runner, so resolve these first:
+                    </p>
+                    <ul>
+                      @for (owner of blocking; track owner.id) {
+                        <li>
+                          @if (owner.repositoryId) {
+                            <a
+                              [routerLink]="[
+                                ...home(),
+                                'repositories',
+                                owner.repositoryId,
+                                'workspaces',
+                                owner.id,
+                              ]"
+                              >{{ owner.label }}</a
+                            >
+                          } @else {
+                            {{ owner.label }}
+                          }
+                        </li>
+                      }
+                    </ul>
+                  </div>
+                }
+                @if (rowError()) {
+                  <p class="note note-error" role="alert">{{ rowError() }}</p>
+                }
+              </div>
+            }
+          </li>
+        }
+      </ul>
+    }
+  }
+</section>

@@ -1,0 +1,568 @@
+import { DOCUMENT } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
+import { RouterLink } from '@angular/router';
+import {
+  QITS_SCOPE,
+  QitsBadge,
+  QitsButton,
+  scopeCommands,
+  type QitsBadgeTone,
+} from '@qits/ui-components';
+import type { RunnerLoginPresence, RunnerRegistrationDto, WorkspaceRunnerDto } from '../api/dto';
+import { ProjectsApi } from '../api/projects-api';
+import { RunnersApi } from '../api/runners-api';
+import { WorkspacesApi } from '../api/workspaces-api';
+import { Async } from '../ui/async';
+import { Empty } from '../ui/empty';
+import { NONE, relativeSince } from '../ui/format';
+import { LOADING, describeError, failed, ready, type Loadable } from '../ui/loadable';
+import { Viewer } from '../ui/viewer';
+
+/**
+ * How often the runner list is re-read while the page is visible. Five seconds: there are no runner
+ * events on qits-events, so this poll is the only way a runner connecting, a slot filling or a login
+ * landing reaches the screen.
+ */
+export const RUNNERS_POLL_INTERVAL_MS = 5_000;
+
+/**
+ * `[a-z][a-z0-9-]{0,63}` — qits-workspaces' own rule for a runner's name, mirrored so a bad one is
+ * caught before the round trip. The service is still the authority.
+ */
+const NAME_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
+
+/** The service's floor. A runner with 0 slots is drained: connected, taking nothing new. */
+const MIN_SLOTS = 0;
+
+/** The refusal a delete answers while the runner still owns an ACTIVE workspace. */
+const OWNS_WORKSPACES = 'RUNNER_OWNS_WORKSPACES';
+
+/** The sentence for a quarantined runner the service gave no reason for — a new one. */
+const AWAITING_FIRST_HEALTHCHECK = 'awaiting its first health check';
+
+/** A badge: what it says and how loud. */
+interface Badge {
+  readonly label: string;
+  readonly tone: QitsBadgeTone;
+}
+
+/**
+ * Connected now, registered but offline, or never connected at all. Green only for the one that is
+ * actually holding a socket — the state a workspace placed on it depends on.
+ */
+function connectivityOf(runner: WorkspaceRunnerDto): Badge {
+  if (runner.connected) {
+    return { label: 'connected', tone: 'success' };
+  }
+  return runner.registered
+    ? { label: 'offline', tone: 'warning' }
+    : { label: 'never connected', tone: 'neutral' };
+}
+
+/** How a login presence reads. `null` is a harness the runner has not reported on. */
+function presenceOf(presence: RunnerLoginPresence | null): Badge {
+  switch (presence) {
+    case 'PRESENT':
+      return { label: 'logged in', tone: 'success' };
+    case 'ABSENT':
+      return { label: 'not logged in', tone: 'warning' };
+    case 'UNKNOWN':
+      return { label: 'unknown', tone: 'neutral' };
+    default:
+      return { label: 'not reported', tone: 'neutral' };
+  }
+}
+
+/**
+ * The owning workspaces a refused delete names, read off the 409 body; `null` when this was not that
+ * refusal. The ids are the body's `workspaceIds`, the code its `code` (or, failing that, the marker
+ * inside the message).
+ */
+function owningWorkspaceIds(error: unknown): readonly number[] | null {
+  if (!(error instanceof HttpErrorResponse) || error.status !== 409) {
+    return null;
+  }
+  const body: unknown = error.error;
+  if (typeof body !== 'object' || body === null) {
+    return null;
+  }
+  const { code, message, workspaceIds } = body as {
+    code?: unknown;
+    message?: unknown;
+    workspaceIds?: unknown;
+  };
+  const matches =
+    code === OWNS_WORKSPACES || (typeof message === 'string' && message.includes(OWNS_WORKSPACES));
+  if (!matches) {
+    return null;
+  }
+  return Array.isArray(workspaceIds)
+    ? workspaceIds.filter((id): id is number => typeof id === 'number')
+    : [];
+}
+
+/** The once-only panel: whose registration it is, and the two things that are never answered again. */
+interface InstallPanel {
+  readonly runnerName: string;
+  readonly registrationToken: string;
+  readonly installLine: string;
+}
+
+/** One workspace a refused delete named: its row id, and where it lives when that could be found. */
+export interface OwningWorkspace {
+  readonly id: number;
+  readonly label: string;
+  /** The repository whose detail route opens it; null when no wrapper's list holds it. */
+  readonly repositoryId: string | null;
+}
+
+/** A runner's editable fields, held as a draft until saved or discarded. */
+interface EditDraft {
+  readonly slots: number;
+  readonly description: string;
+}
+
+/**
+ * The workspace runners: every node qits-workspaces can place a workspace on, a form to register
+ * another, and the one-time install line that registering — or rotating a token — answers.
+ *
+ * Modelled on qits-ci-frontend's runners page, as a copy: the two registries are different services
+ * with different DTOs, and a shared component is not worth what it would couple.
+ *
+ * <h2>The install line is shown once</h2>
+ *
+ * Create and rotate both answer a single-use registration token inside a one-line install. This
+ * page holds it in exactly one signal — {@link panel} — while the panel showing it is open. Closing
+ * the panel drops it, nothing persists it, and a reload loses it: the page says so, because the
+ * remedy (rotate) is only obvious to somebody who knows the line is gone for good.
+ *
+ * <h2>The login is per node</h2>
+ *
+ * Each runner owns a node-local `dot_claude` volume its workspaces share. The operator logs in once
+ * on the node with the command the runner reports; the platform never carries the secret. So the
+ * panel under each runner is only ever what the runner says it found, with the command to fix it.
+ *
+ * <h2>Who may press what</h2>
+ *
+ * Reads are for everyone who can read workspaces. Every write is `qits:admin`'s, and {@link Viewer}
+ * is what decides whether those controls are drawn at all.
+ */
+@Component({
+  selector: 'app-runners-page',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [Async, Empty, QitsBadge, QitsButton, RouterLink],
+  templateUrl: './runners-page.html',
+  styleUrl: './runners-page.css',
+})
+export class RunnersPage {
+  private readonly api = inject(RunnersApi);
+  private readonly projectsApi = inject(ProjectsApi);
+  private readonly workspacesApi = inject(WorkspacesApi);
+  private readonly document = inject(DOCUMENT);
+  private readonly qitsScope = inject(QITS_SCOPE);
+  private readonly viewer = inject(Viewer);
+
+  protected readonly admin = this.viewer.admin;
+  protected readonly none = NONE;
+  protected readonly minSlots = MIN_SLOTS;
+  protected readonly connectivity = connectivityOf;
+  protected readonly presence = presenceOf;
+
+  /** Where this page's own links start — bare, or under the scope the reader came in through. */
+  protected readonly home = computed<string[]>(() => [...scopeCommands(this.qitsScope.scope())]);
+
+  /** The clock the "ago" labels are read against, moved by every poll. */
+  private readonly now = signal(new Date());
+
+  protected readonly runners = signal<Loadable<readonly WorkspaceRunnerDto[]>>(LOADING);
+
+  // --- the create form ---
+
+  protected readonly newName = signal('');
+  protected readonly newDescription = signal('');
+  protected readonly newSlots = signal(1);
+  protected readonly creating = signal(false);
+  protected readonly createError = signal('');
+  private readonly submitted = signal(false);
+
+  protected readonly nameProblem = computed(() => {
+    if (!this.submitted()) {
+      return '';
+    }
+    const name = this.newName();
+    if (!name) {
+      return 'A name is required.';
+    }
+    return NAME_PATTERN.test(name)
+      ? ''
+      : 'Lowercase letters, digits and hyphens, starting with a letter.';
+  });
+
+  protected readonly slotsProblem = computed(() => {
+    if (!this.submitted()) {
+      return '';
+    }
+    const slots = this.newSlots();
+    return Number.isInteger(slots) && slots >= MIN_SLOTS ? '' : 'Slots must be 0 or more.';
+  });
+
+  // --- the once-only install panel, shared by create and rotate ---
+
+  protected readonly panel = signal<InstallPanel | null>(null);
+  protected readonly copied = signal<string | null>(null);
+  private copiedTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  // --- per-row state; one row's menu open at a time ---
+
+  protected readonly openRow = signal<string | null>(null);
+  protected readonly editing = signal<EditDraft | null>(null);
+  protected readonly busy = signal<string | null>(null);
+  protected readonly rowError = signal('');
+  protected readonly confirmingDelete = signal(false);
+
+  /** The workspaces a refused delete named, resolved to links where a wrapper's list holds them. */
+  protected readonly owners = signal<readonly OwningWorkspace[] | null>(null);
+
+  /** Per runner, the error of its last login re-check — shown inside its login panel. */
+  protected readonly loginError = signal<ReadonlyMap<string, string>>(new Map());
+
+  private pollHandle: ReturnType<typeof setInterval> | null = null;
+  private inFlight = false;
+
+  constructor() {
+    void this.load();
+
+    const onVisibilityChange = () => this.onVisibilityChange();
+    this.document.addEventListener('visibilitychange', onVisibilityChange);
+    inject(DestroyRef).onDestroy(() => {
+      this.document.removeEventListener('visibilitychange', onVisibilityChange);
+      this.stopPolling();
+      if (this.copiedTimeout !== null) {
+        clearTimeout(this.copiedTimeout);
+      }
+    });
+
+    this.sync();
+  }
+
+  protected ago(iso: string | null): string {
+    return iso ? relativeSince(iso, this.now()) : NONE;
+  }
+
+  protected async load(): Promise<void> {
+    this.runners.set(LOADING);
+    try {
+      this.runners.set(ready(sortRunners(await this.api.runners())));
+      this.now.set(new Date());
+    } catch (error) {
+      this.runners.set(failed(error));
+    }
+  }
+
+  private async poll(): Promise<void> {
+    if (this.inFlight) {
+      return;
+    }
+    this.inFlight = true;
+    try {
+      this.runners.set(ready(sortRunners(await this.api.runners())));
+      this.now.set(new Date());
+    } catch {
+      // The last list stays on screen; one missed poll is not worth a banner.
+    } finally {
+      this.inFlight = false;
+    }
+  }
+
+  private sync(): void {
+    if (this.document.hidden) {
+      this.stopPolling();
+    } else {
+      this.pollHandle ??= setInterval(() => void this.poll(), RUNNERS_POLL_INTERVAL_MS);
+    }
+  }
+
+  private stopPolling(): void {
+    if (this.pollHandle !== null) {
+      clearInterval(this.pollHandle);
+      this.pollHandle = null;
+    }
+  }
+
+  private onVisibilityChange(): void {
+    if (!this.document.hidden) {
+      void this.poll();
+    }
+    this.sync();
+  }
+
+  // --- what a row says ---
+
+  /**
+   * Whether the runner is about to be rolled over: connected, and reporting a version other than the
+   * one the service pins. A runner that is offline is not updating — it is offline.
+   */
+  protected updating(runner: WorkspaceRunnerDto): boolean {
+    return runner.connected && runner.version !== runner.pinnedVersion;
+  }
+
+  protected quarantineReason(runner: WorkspaceRunnerDto): string {
+    return runner.quarantineReason ?? AWAITING_FIRST_HEALTHCHECK;
+  }
+
+  protected healthCheck(runner: WorkspaceRunnerDto): Badge | null {
+    if (runner.lastHealthCheckOk === null) {
+      return null;
+    }
+    return runner.lastHealthCheckOk
+      ? { label: 'health check passed', tone: 'success' }
+      : { label: 'health check failed', tone: 'danger' };
+  }
+
+  // --- creating a runner ---
+
+  protected async createRunner(): Promise<void> {
+    this.submitted.set(true);
+    if (this.nameProblem() || this.slotsProblem()) {
+      return;
+    }
+    this.creating.set(true);
+    this.createError.set('');
+    try {
+      const created = await this.api.createRunner({
+        name: this.newName(),
+        description: this.newDescription() || null,
+        slots: this.newSlots(),
+      });
+      this.openPanel(created);
+      this.newName.set('');
+      this.newDescription.set('');
+      this.newSlots.set(1);
+      this.submitted.set(false);
+      await this.load();
+    } catch (error) {
+      this.viewer.noteRefusal(error);
+      this.createError.set(`Could not register this runner — ${describeError(error)}.`);
+    } finally {
+      this.creating.set(false);
+    }
+  }
+
+  private openPanel(registration: RunnerRegistrationDto): void {
+    this.panel.set({
+      runnerName: registration.runner.name,
+      registrationToken: registration.registrationToken,
+      installLine: registration.installLine,
+    });
+    this.copied.set(null);
+  }
+
+  /** Closes the panel and drops the token with it — nothing on this page holds it anywhere else. */
+  protected closePanel(): void {
+    this.panel.set(null);
+    this.copied.set(null);
+  }
+
+  /** Copy one string; `what` names it, so the button that was pressed is the one that says "Copied". */
+  protected async copy(what: string, text: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // No clipboard (an insecure origin, a denied permission): the text is on screen to select.
+      return;
+    }
+    this.copied.set(what);
+    if (this.copiedTimeout !== null) {
+      clearTimeout(this.copiedTimeout);
+    }
+    this.copiedTimeout = setTimeout(() => this.copied.set(null), 2000);
+  }
+
+  // --- the row menu ---
+
+  protected isRowOpen(id: string): boolean {
+    return this.openRow() === id;
+  }
+
+  protected toggleRow(id: string): void {
+    this.openRow.set(this.openRow() === id ? null : id);
+    this.editing.set(null);
+    this.rowError.set('');
+    this.confirmingDelete.set(false);
+    this.owners.set(null);
+  }
+
+  protected startEdit(runner: WorkspaceRunnerDto): void {
+    this.editing.set({ slots: runner.slots, description: runner.description ?? '' });
+    this.rowError.set('');
+  }
+
+  protected cancelEdit(): void {
+    this.editing.set(null);
+    this.rowError.set('');
+  }
+
+  protected setEditSlots(slots: number): void {
+    this.editing.update((draft) => (draft ? { ...draft, slots } : draft));
+  }
+
+  protected setEditDescription(description: string): void {
+    this.editing.update((draft) => (draft ? { ...draft, description } : draft));
+  }
+
+  protected async saveEdit(runner: WorkspaceRunnerDto): Promise<void> {
+    const draft = this.editing();
+    if (!draft) {
+      return;
+    }
+    if (!Number.isInteger(draft.slots) || draft.slots < MIN_SLOTS) {
+      this.rowError.set('Slots must be 0 or more.');
+      return;
+    }
+    await this.act('save', 'Could not save', async () => {
+      await this.api.patchRunner(runner.id, {
+        slots: draft.slots,
+        description: draft.description || null,
+      });
+      this.editing.set(null);
+    });
+  }
+
+  protected async rotateToken(runner: WorkspaceRunnerDto): Promise<void> {
+    await this.act('rotate', 'Could not rotate the registration token', async () => {
+      this.openPanel(await this.api.rotateToken(runner.id));
+      this.openRow.set(null);
+    });
+  }
+
+  protected async greenlight(runner: WorkspaceRunnerDto): Promise<void> {
+    await this.act('greenlight', 'Could not greenlight this runner', () =>
+      this.api.greenlight(runner.id),
+    );
+  }
+
+  protected async runHealthCheck(runner: WorkspaceRunnerDto): Promise<void> {
+    await this.act('healthcheck', 'Could not run a health check', () =>
+      this.api.healthCheck(runner.id),
+    );
+  }
+
+  protected askDelete(): void {
+    this.confirmingDelete.set(true);
+  }
+
+  protected dismissDelete(): void {
+    this.confirmingDelete.set(false);
+  }
+
+  protected async confirmDelete(runner: WorkspaceRunnerDto): Promise<void> {
+    this.busy.set('delete');
+    this.rowError.set('');
+    this.owners.set(null);
+    try {
+      await this.api.deleteRunner(runner.id);
+      this.openRow.set(null);
+      this.confirmingDelete.set(false);
+      await this.load();
+    } catch (error) {
+      this.viewer.noteRefusal(error);
+      const ids = owningWorkspaceIds(error);
+      if (ids) {
+        this.confirmingDelete.set(false);
+        this.owners.set(await this.resolveOwners(ids));
+      } else {
+        this.rowError.set(`Could not delete this runner — ${describeError(error)}.`);
+      }
+    } finally {
+      this.busy.set(null);
+    }
+  }
+
+  /**
+   * Turn the 409's row ids into links.
+   *
+   * The refusal names ids alone, and the detail route needs the workspace's repository too — which
+   * no workspace read answers. So each project's wrapper list is read, because the wrapper is what an
+   * aggregate workspace branches, and an id found there gets its link and its branch name. An id no
+   * wrapper holds is still listed, by number: the fact that it blocks the delete is worth more than
+   * the link.
+   */
+  private async resolveOwners(ids: readonly number[]): Promise<readonly OwningWorkspace[]> {
+    const found = new Map<number, OwningWorkspace>();
+    try {
+      const projects = await this.projectsApi.projects();
+      const wrappers = await Promise.all(
+        projects.map(async (project) => (await this.projectsApi.components(project.id)).wrapper),
+      );
+      for (const wrapper of wrappers) {
+        if (!wrapper || ids.every((id) => found.has(id))) {
+          continue;
+        }
+        for (const workspace of await this.workspacesApi.workspaces(wrapper.repositoryId)) {
+          if (ids.includes(workspace.id)) {
+            found.set(workspace.id, {
+              id: workspace.id,
+              label: workspace.branch ?? workspace.workspaceId,
+              repositoryId: wrapper.repositoryId,
+            });
+          }
+        }
+      }
+    } catch {
+      // The ids are still the answer; a failed lookup only costs the links.
+    }
+    return ids.map((id) => found.get(id) ?? { id, label: `workspace #${id}`, repositoryId: null });
+  }
+
+  /** Re-probe a node's logins. The answer arrives with a later poll, not with this call. */
+  protected async recheckLogin(runner: WorkspaceRunnerDto): Promise<void> {
+    this.busy.set(`login:${runner.id}`);
+    this.loginError.update((map) => {
+      const next = new Map(map);
+      next.delete(runner.id);
+      return next;
+    });
+    try {
+      await this.api.loginCheck(runner.id);
+    } catch (error) {
+      this.viewer.noteRefusal(error);
+      this.loginError.update((map) =>
+        new Map(map).set(runner.id, `Could not re-check — ${describeError(error)}.`),
+      );
+    } finally {
+      this.busy.set(null);
+    }
+  }
+
+  /**
+   * One row verb: mark it busy, keep the reason on failure, and re-read either way — a refused
+   * press may still have moved something, and the row that produced the refusal is the least
+   * trustworthy thing on screen.
+   */
+  private async act(which: string, failure: string, call: () => Promise<unknown>): Promise<void> {
+    this.busy.set(which);
+    this.rowError.set('');
+    try {
+      await call();
+    } catch (error) {
+      this.viewer.noteRefusal(error);
+      this.rowError.set(`${failure} — ${describeError(error)}.`);
+    } finally {
+      this.busy.set(null);
+      await this.poll();
+    }
+  }
+}
+
+/** Alphabetical by name, so a poll never reshuffles the rows under the reader's pointer. */
+function sortRunners(runners: readonly WorkspaceRunnerDto[]): readonly WorkspaceRunnerDto[] {
+  return [...runners].sort((a, b) => a.name.localeCompare(b.name));
+}

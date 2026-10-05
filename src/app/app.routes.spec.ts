@@ -2,15 +2,16 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideLocationMocks } from '@angular/common/testing';
 import { TestBed } from '@angular/core/testing';
-import { Router, provideRouter } from '@angular/router';
+import { Router, UrlSegment, provideRouter, type Route } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { QITS_CATEGORIES, provideQitsRepositoryList, provideQitsScope } from '@qits/ui-components';
 import { EVENT_SOURCE_FACTORY, type EventSourceLike } from './api/event-source';
-import { routes } from './app.routes';
+import { isRepositoryAddress, routes } from './app.routes';
 import { WorkspaceDetailPage } from './detail/workspace-detail-page';
 import { EditorPage } from './editor/editor-page';
 import { NotFound } from './not-found/not-found';
 import { WorkspacesPage } from './overview/workspaces-page';
+import { RunnersPage } from './runners/runners-page';
 
 /**
  * One page, three spellings of every address.
@@ -83,6 +84,20 @@ describe('routes', () => {
   it('never reads its own `editor` segment as a project', async () => {
     // `/editor/qits-ci/qits-ci-service` would otherwise be a project called `editor`.
     expect(await activated('/editor/qits-ci/qits-ci-service')).toBe(NotFound);
+  });
+
+  it('serves the runners page bare and under a project', async () => {
+    expect(await activated('/runners')).toBe(RunnersPage);
+    expect(await activated('/qits/runners')).toBe(RunnersPage);
+  });
+
+  it('never reads its own `runners` segment as a project', async () => {
+    // `/runners/qits-ci/qits-ci-service` would otherwise be a project called `runners`.
+    expect(await activated('/runners/qits-ci/qits-ci-service')).toBe(NotFound);
+    const segments = ['runners', 'qits-ci', 'qits-ci-service'].map(
+      (path) => new UrlSegment(path, {}),
+    );
+    expect(isRepositoryAddress({} as Route, segments)).toBe(false);
   });
 
   it('serves a workspace bare', async () => {

@@ -1,7 +1,10 @@
 <main class="page">
   <header>
     <p class="eyebrow">{{ scopeLabel() || 'Development' }}</p>
-    <h1>Workspaces</h1>
+    <div class="title">
+      <h1>Workspaces</h1>
+      <a class="runners-link" [routerLink]="[...home(), 'runners']">Runners</a>
+    </div>
     <p class="intro">
       Create a disposable checkout of a project with one branch shared by its wrapper repository and
       every submodule under it.

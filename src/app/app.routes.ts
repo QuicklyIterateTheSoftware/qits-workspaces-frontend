@@ -4,9 +4,10 @@ import { WorkspaceDetailPage } from './detail/workspace-detail-page';
 import { EditorPage } from './editor/editor-page';
 import { NotFound } from './not-found/not-found';
 import { WorkspacesPage } from './overview/workspaces-page';
+import { RunnersPage } from './runners/runners-page';
 
 /**
- * The three pages this application owns.
+ * The pages this application owns.
  *
  * **The root view is intentionally small.** It lists the active workspaces of whatever repository
  * is in scope and offers the create flow. Unscoped it falls back to a picker, one wrapper per
@@ -27,6 +28,11 @@ import { WorkspacesPage } from './overview/workspaces-page';
  * settled. The literal joins the closed vocabulary of first segments below, so no project may be
  * called `editor`, exactly as none may be called `repositories`.
  *
+ * **`runners` is the same kind of literal.** A workspace runner is infrastructure the whole estate
+ * shares, so the page has no subject but itself and answers at every spelling only so the chrome
+ * keeps whatever scope the reader came in with. It joins the vocabulary too: no project may be
+ * called `runners`.
+ *
  * **Which tab is open rides in `?tab=`, not in a trailing segment.** A trailing segment would make a
  * tab switch free (Angular reuses a component across a parameter change) and would make a *workspace*
  * switch free too — which is the bug, not the feature. Keeping the tab in the query string leaves the
@@ -36,6 +42,7 @@ import { WorkspacesPage } from './overview/workspaces-page';
 const own: Routes = [
   { path: '', component: WorkspacesPage },
   { path: 'editor', component: EditorPage },
+  { path: 'runners', component: RunnersPage },
   {
     path: 'repositories/:repositoryId/workspaces/:workspaceId',
     component: WorkspaceDetailPage,

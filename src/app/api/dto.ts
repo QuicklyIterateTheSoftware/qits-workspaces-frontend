@@ -605,3 +605,79 @@ export interface CreateWorkspaceResponse {
 export interface RepositoryResponse {
   readonly repository: RepositoryDto;
 }
+
+/** A node's agent CLI login, as its runner last probed it. `null` is a harness it did not report. */
+export type RunnerLoginPresence = 'PRESENT' | 'ABSENT' | 'UNKNOWN';
+
+/**
+ * The agent logins on a runner's node. The operator logs in once per node, into the runner's own
+ * `dot_claude` volume that its workspaces share; the platform never carries the secret, so this is
+ * only what the runner says it found, and when.
+ */
+export interface WorkspaceRunnerLoginDto {
+  readonly claude: RunnerLoginPresence | null;
+  readonly kimi: RunnerLoginPresence | null;
+  readonly checkedAt: string | null;
+}
+
+/**
+ * One workspace runner, as `GET /workspaces/api/runners` lists it — copied field-for-field from
+ * qits-workspaces' `WorkspaceRunnerDto`.
+ *
+ * `eligible` is the service's own reading of "can take a workspace now": registered, at least one
+ * slot, not quarantined. `pinnedVersion` is the runner version the service pins; a connected runner
+ * reporting a different `version` is about to be rolled over. `running` counts its containers that
+ * hold a slot, `owned` its ACTIVE workspaces, `queued` the ones waiting for a slot on it.
+ * `loginCommand`/`kimiLoginCommand` are null until the runner reported its `dot_claude` volume.
+ */
+export interface WorkspaceRunnerDto {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string | null;
+  readonly slots: number;
+  readonly version: string | null;
+  readonly arch: string | null;
+  readonly dotClaudeVolume: string | null;
+  readonly login: WorkspaceRunnerLoginDto | null;
+  readonly registered: boolean;
+  readonly registeredAt: string | null;
+  readonly quarantined: boolean;
+  readonly quarantinedAt: string | null;
+  readonly quarantineReason: string | null;
+  readonly eligible: boolean;
+  readonly lastSeenAt: string | null;
+  readonly lastHealthCheckAt: string | null;
+  readonly lastHealthCheckOk: boolean | null;
+  readonly createdAt: string;
+  readonly connected: boolean;
+  readonly connectedSince: string | null;
+  readonly pinnedVersion: string;
+  readonly running: number;
+  readonly owned: number;
+  readonly queued: number;
+  readonly loginCommand: string | null;
+  readonly kimiLoginCommand: string | null;
+}
+
+/** What a runner create takes. Slots are the containers it may run at once. */
+export interface CreateRunnerRequest {
+  readonly name: string;
+  readonly description?: string | null;
+  readonly slots: number;
+}
+
+/** What a runner PATCH takes: only the fields that are sent change. */
+export interface PatchRunnerRequest {
+  readonly slots?: number;
+  readonly description?: string | null;
+}
+
+/**
+ * What a create and a token rotation answer. `registrationToken` and `installLine` are single-use
+ * and are never answered again — a page that loses them makes a new one by rotating.
+ */
+export interface RunnerRegistrationDto {
+  readonly runner: WorkspaceRunnerDto;
+  readonly registrationToken: string;
+  readonly installLine: string;
+}
