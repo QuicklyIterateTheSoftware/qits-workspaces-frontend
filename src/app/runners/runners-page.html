@@ -221,6 +221,11 @@
                     </qits-button>
                   </div>
                 }
+              } @else if (runner.loginCommandPending) {
+                <p class="login-hint">
+                  The runner is still fetching the workspace image. The login command appears here
+                  once it is on the node.
+                </p>
               } @else {
                 <p class="login-hint">
                   The login command appears once the runner has reported its node volume.

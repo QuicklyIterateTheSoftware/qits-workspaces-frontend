@@ -290,6 +290,31 @@ describe('RunnersPage', () => {
       expect(login.textContent).toContain('appears once the runner has reported its node volume');
     });
 
+    it('says the login command waits for the workspace image when the runner has not got it yet', async () => {
+      const fixture = await open([
+        runner({
+          login: null,
+          loginCommand: null,
+          kimiLoginCommand: null,
+          loginCommandPending: true,
+        }),
+      ]);
+
+      const login = element(fixture).querySelector('.login')!;
+      expect(login.querySelector('.login-command')).toBeNull();
+      expect(login.querySelector('.command')).toBeNull();
+      expect(login.textContent).toContain('still fetching the workspace image');
+      expect(login.textContent).toContain('appears here once it is on the node');
+    });
+
+    it('keeps the login command unchanged when loginCommandPending is false', async () => {
+      const fixture = await open([runner({ loginCommandPending: false })]);
+
+      const login = element(fixture).querySelector('.login')!;
+      expect(login.querySelector('.login-command')?.textContent).toContain('qits/claude login');
+      expect(login.textContent).not.toContain('still fetching the workspace image');
+    });
+
     it('asks the runner to re-check its login', async () => {
       const fixture = await open([runner()]);
 

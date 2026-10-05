@@ -675,6 +675,9 @@ export interface WorkspaceRunnerLoginDto {
  * reporting a different `version` is about to be rolled over. `running` counts its containers that
  * hold a slot, `owned` its ACTIVE workspaces, `queued` the ones waiting for a slot on it.
  * `loginCommand`/`kimiLoginCommand` are null until the runner reported its `dot_claude` volume.
+ * `loginCommandPending` is true when that volume is known but the commands are still withheld
+ * because the runner has not yet got the workspace image onto its node; optional, absent means
+ * false, so the SPA keeps working against a server that predates the field.
  */
 export interface WorkspaceRunnerDto {
   readonly id: string;
@@ -703,6 +706,7 @@ export interface WorkspaceRunnerDto {
   readonly queued: number;
   readonly loginCommand: string | null;
   readonly kimiLoginCommand: string | null;
+  readonly loginCommandPending?: boolean;
 }
 
 /** What a runner create takes. Slots are the containers it may run at once. */
