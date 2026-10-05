@@ -26,7 +26,25 @@ export type WorkspaceStatus = 'ACTIVE' | 'INTEGRATED' | 'ABANDONED';
  * qits-workspaces merges from the bare origin's refs — so a STOPPED workspace releases and
  * integrates exactly as well as a RUNNING one, and disabling the button on one would be a fiction.
  */
-export type WorkspaceRuntimeStatus = 'RUNNING' | 'STOPPED' | 'PROVISIONING' | 'FAILED';
+export type WorkspaceRuntimeStatus =
+  'RUNNING' | 'STOPPED' | 'PROVISIONING' | 'FAILED' | 'QUEUED' | 'UNAVAILABLE';
+
+/**
+ * Where a workspace's container runs, decided at create and never changed: `DIRECT` on the platform
+ * host through qits-containers, `RUNNER` on a workspace runner's own node.
+ *
+ * Two runtime states exist only for `RUNNER`. `QUEUED` is persisted — the workspace was asked to
+ * start and waits for a slot on its runner (or, never placed yet, for any runner). `UNAVAILABLE` is
+ * computed and never stored: the owning runner has been offline beyond its reconnect grace, and the
+ * workspace is sticky to it, so nothing reassigns it and its verbs answer 409 until it is back.
+ */
+export type WorkspacePlacement = 'DIRECT' | 'RUNNER';
+
+/** The runner a `RUNNER` workspace is placed on, by id and by the name the runners page shows. */
+export interface WorkspaceRunnerRefDto {
+  readonly id: string;
+  readonly name: string;
+}
 
 /**
  * The coding-agent activity rollup, as last reported by the in-container `workspace-daemon`.
@@ -110,6 +128,18 @@ export interface WorkspaceDto {
    * than claiming the workspace is ordinary. Read it as privileged only when it is literally `true`.
    */
   readonly admin?: boolean;
+
+  /**
+   * Where the container runs, and on which runner. **Optional**, for the reason `admin` is: a
+   * service that predates placement answers none of the three, and every such row is `DIRECT` —
+   * so a row is runner-placed only when `placement` is literally `'RUNNER'`.
+   *
+   * `runner` is null for every `DIRECT` row and for a `RUNNER` row no runner has taken yet;
+   * `queuedAt` is when a `QUEUED` row was last asked to start, and null otherwise.
+   */
+  readonly placement?: WorkspacePlacement;
+  readonly runner?: WorkspaceRunnerRefDto | null;
+  readonly queuedAt?: string | null;
 }
 
 /** The workspace list envelope: entries, each wrapping the thing it lists. */
@@ -224,6 +254,14 @@ export interface WorkspaceHistoryDetailDto {
   readonly createdAt: string;
   readonly resolvedAt: string | null;
   readonly events: readonly WorkspaceHistoryEventDto[];
+
+  /**
+   * Where the workspace ran. **Not answered by qits-workspaces yet** — its history record predates
+   * placement — and optional for that reason: absent reads as `DIRECT`, which is what every row made
+   * before runners was. It is what lets the resolved page say why a runner-placed workspace has no
+   * archived agent sessions, rather than drawing an empty list that reads as "none ran".
+   */
+  readonly placement?: WorkspacePlacement;
 }
 
 /** The history read's envelope. */
@@ -587,6 +625,14 @@ export interface CreateWorkspaceRequest {
    * once, at creation; no request afterwards can promote a workspace.
    */
   readonly admin?: boolean;
+
+  /**
+   * Where the container should run. Optional and **omitted means `DIRECT`**, which is what every
+   * caller but the overview's "Place on a runner" box sends. The service refuses `RUNNER` together
+   * with `admin` (400) — an admin workspace holds the host's docker socket and stays on the host —
+   * and answers 409 `NO_RUNNER` when no runner is eligible to take it.
+   */
+  readonly placement?: WorkspacePlacement;
 }
 
 /** What a create answers: the workspace it just made. */

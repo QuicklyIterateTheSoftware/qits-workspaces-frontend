@@ -126,6 +126,18 @@ form > button {
   font-size: 0.72rem;
   letter-spacing: 0.02em;
 }
+/* A runner-placed workspace is never admin-mode, so this badge takes the admin badge's place. */
+.runner-badge {
+  align-self: center;
+  margin-left: auto;
+  margin-right: 0.75rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid #1f4f7a;
+  border-radius: 0.35rem;
+  color: #8ec5f0;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+}
 .hint {
   margin: 0.9rem 0 0;
   font-size: 0.8rem;

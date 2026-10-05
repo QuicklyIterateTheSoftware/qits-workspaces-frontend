@@ -1,12 +1,13 @@
 import { Location } from '@angular/common';
-import { provideHttpClient } from '@angular/common/http';
+import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideLocationMocks } from '@angular/common/testing';
 import { provideQitsRepositoryList, provideQitsScope } from '@qits/ui-components';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
-import type { ProjectDto, RepositoryDto, WorkspaceDto } from '../api/dto';
+import type { ProjectDto, RepositoryDto, WorkspaceDto, WorkspaceRunnerDto } from '../api/dto';
 import { routes } from '../app.routes';
+import { Viewer } from '../ui/viewer';
 import { WorkspacesPage } from './workspaces-page';
 
 const project = (id: string, name: string): ProjectDto => ({
@@ -91,6 +92,9 @@ describe('WorkspacesPage', () => {
 
   const PROJECTS_URL = '/projects/api/projects';
   const repositoriesUrl = (projectId: string) => `/projects/api/projects/${projectId}/repositories`;
+  const RUNNERS_URL = '/workspaces/api/runners';
+  /** How many runner reads the last {@link open} answered. */
+  let runnerReadCount = 0;
   const workspacesUrl = (repositoryId: string) =>
     `/workspaces/api/workspaces?repositoryId=${repositoryId}`;
 
@@ -132,6 +136,8 @@ describe('WorkspacesPage', () => {
       projects?: readonly ProjectFixture[];
       workspaces?: readonly WorkspaceDto[];
       url?: string;
+      /** What the runner registry lists; only an admin's page asks, and only to offer the option. */
+      runners?: readonly Partial<WorkspaceRunnerDto>[];
     } = {},
   ): Promise<ComponentFixture<WorkspacesPage>> => {
     const projects = options.projects ?? [
@@ -143,6 +149,11 @@ describe('WorkspacesPage', () => {
     const component = TestBed.createComponent(WorkspacesPage);
     await settle(component);
 
+    const runnerReads = http.match(RUNNERS_URL);
+    runnerReadCount = runnerReads.length;
+    for (const read of runnerReads) {
+      read.flush(options.runners ?? []);
+    }
     http
       .expectOne(PROJECTS_URL)
       .flush({ entries: projects.map((entry) => ({ project: entry.project })) });
@@ -381,5 +392,82 @@ describe('WorkspacesPage', () => {
 
     expect(text(component)).toContain('Branch already exists in qits-ci: adhoc-changes');
     expect(TestBed.inject(Location).path()).toBe('');
+  });
+  describe('placing a workspace on a runner', () => {
+    const box = (component: ComponentFixture<WorkspacesPage>, name: string) =>
+      (component.nativeElement as HTMLElement).querySelector(
+        `input[name="${name}"]`,
+      ) as HTMLInputElement | null;
+
+    const tick = async (component: ComponentFixture<WorkspacesPage>, name: string) => {
+      const input = box(component, name)!;
+      input.checked = true;
+      input.dispatchEvent(new Event('change'));
+      await settle(component);
+    };
+
+    it('is not offered while no runner is eligible', async () => {
+      const component = await open({ runners: [{ id: 'r-1', name: 'node-a', eligible: false }] });
+
+      expect(runnerReadCount).toBe(1);
+      expect(box(component, 'placeOnRunner')).toBeNull();
+    });
+
+    it('sends placement RUNNER when ticked, and excludes the docker socket', async () => {
+      const component = await open({ runners: [{ id: 'r-1', name: 'node-a', eligible: true }] });
+
+      expect(box(component, 'placeOnRunner')).not.toBeNull();
+      await tick(component, 'placeOnRunner');
+      expect(box(component, 'admin')!.disabled).toBe(true);
+
+      await submit(component);
+
+      const create = http.expectOne('/workspaces/api/workspaces');
+      expect(create.request.body).toEqual({
+        repositoryId: 'qits-qits',
+        id: 'adhoc-changes',
+        parent: 'main',
+        branch: 'adhoc-changes',
+        preamble: '',
+        adoptExisting: false,
+        branchTree: true,
+        admin: false,
+        placement: 'RUNNER',
+      });
+      create.flush({ workspace: workspace({ placement: 'RUNNER', runtimeStatus: 'QUEUED' }) });
+      await settle(component);
+      http.expectOne('/workspaces/api/workspaces/12/ensure-container').flush({});
+      await settle(component);
+    });
+
+    it('is never offered to a viewer who is not an admin, who does not even ask', async () => {
+      // The service said no to this viewer once already; the page stops offering what it refuses.
+      TestBed.inject(Viewer).noteRefusal(new HttpErrorResponse({ status: 403 }));
+      const component = await open({ runners: [{ id: 'r-1', name: 'node-a', eligible: true }] });
+
+      expect(box(component, 'placeOnRunner')).toBeNull();
+      expect(runnerReadCount).toBe(0);
+    });
+
+    it('is disabled while the docker socket is ticked', async () => {
+      const component = await open({ runners: [{ id: 'r-1', name: 'node-a', eligible: true }] });
+
+      await tick(component, 'admin');
+
+      expect(box(component, 'placeOnRunner')!.disabled).toBe(true);
+    });
+
+    it('marks a runner-placed row with its runner', async () => {
+      const component = await open({
+        workspaces: [
+          workspace({ placement: 'RUNNER', runner: { id: 'r-1', name: 'node-a' } }),
+          workspace({ id: 13, branch: 'direct', placement: 'DIRECT', runner: null }),
+        ],
+      });
+
+      const rows = (component.nativeElement as HTMLElement).querySelectorAll('li');
+      expect(rows[0].querySelector('.runner-badge')?.textContent).toContain('on node-a');
+      expect(rows[1].querySelector('.runner-badge')).toBeNull();
+    });
   });
 });

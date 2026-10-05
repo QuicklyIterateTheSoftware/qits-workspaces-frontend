@@ -14,6 +14,9 @@ import {
 import { HINT_REMOTE_AUTH } from '../../api/dto';
 import { ProcessLog, type ProcessSegment } from './process-log';
 
+/** The segment a runner-placed start waits in before its container is launched. */
+export const QUEUED_SEGMENT = 'queued';
+
 /**
  * The transient tab: what a long operation against this workspace is doing, while it does it.
  *
@@ -30,6 +33,11 @@ import { ProcessLog, type ProcessSegment } from './process-log';
  * is `remote-auth`, and its target names the repository to sign into — **for a submodule child that
  * is not the root repository**, so the sentence quotes the target it was given rather than the
  * workspace's own repository.
+ *
+ * **A runner-placed start opens with a `queued` segment**: the workspace waits for a slot on its
+ * runner, or for any runner, before `container` begins. Its key says nothing to a reader, so the
+ * head reads the service's own words instead — the segment's newest line, "waiting for a slot on
+ * <runner>" — and its badge says `waiting` rather than `running`, because nothing is running yet.
  */
 @Component({
   selector: 'app-starting-panel',
@@ -67,7 +75,7 @@ import { ProcessLog, type ProcessSegment } from './process-log';
             (click)="toggle(segment)"
           >
             <span class="chevron" aria-hidden="true"></span>
-            <span class="name">{{ segment.name }}</span>
+            <span class="name">{{ segmentLabel(segment) }}</span>
             <span class="badge" [class]="segment.status">{{ statusLabel(segment) }}</span>
           </button>
           @if (isOpen(segment)) {
@@ -234,7 +242,18 @@ export class StartingPanel {
     this.manual.update((manual) => new Map(manual).set(segment.name, !open));
   }
 
+  /** What a segment's head says: its name, or for the `queued` wait, what it is waiting for. */
+  protected segmentLabel(segment: ProcessSegment): string {
+    if (segment.name !== QUEUED_SEGMENT) {
+      return segment.name;
+    }
+    return segment.lines.at(-1)?.trim() || 'waiting for a runner';
+  }
+
   protected statusLabel(segment: ProcessSegment): string {
-    return segment.status === 'running' ? 'running' : segment.status === 'ok' ? 'ok' : 'failed';
+    if (segment.status === 'running') {
+      return segment.name === QUEUED_SEGMENT ? 'waiting' : 'running';
+    }
+    return segment.status === 'ok' ? 'ok' : 'failed';
   }
 }

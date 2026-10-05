@@ -370,6 +370,14 @@ describe('WorkspaceDetailPage', () => {
     expect(element().querySelector('.async-error')).toBeNull();
   });
 
+  it('says a runner-placed workspace has no archived transcripts, instead of an empty list', async () => {
+    await openResolved([], { placement: 'RUNNER' });
+
+    const empty = element().querySelector('app-empty')?.textContent ?? '';
+    expect(empty).toContain('Archived transcripts are not available for runner-placed workspaces');
+    expect(empty).not.toContain('No agent sessions could be read');
+  });
+
   /**
    * A transcript is the expensive read on this screen and is never made speculatively — which is
    * also why the selection is in the URL rather than in a signal.

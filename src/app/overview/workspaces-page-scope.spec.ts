@@ -87,6 +87,10 @@ describe('WorkspacesPage in scope', () => {
   const open = async (): Promise<ComponentFixture<WorkspacesPage>> => {
     const component = TestBed.createComponent(WorkspacesPage);
     await settle(component);
+    // The runner registry, read only to decide whether "Place on a runner" is offered.
+    for (const read of http.match('/workspaces/api/runners')) {
+      read.flush([]);
+    }
     http.expectOne('/projects/api/projects').flush({ entries: [{ project: PROJECT }] });
     await settle(component);
     http.expectOne('/projects/api/projects/p1/repositories').flush({

@@ -189,9 +189,16 @@
                     rest of it. So the sentence says what is actually known — that none could be read
                     — and leaves whether any ran an open question, which it is.
                   -->
-                  <app-empty
-                    message="No agent sessions could be read for this workspace. That is not the same as none having run: a session becomes readable only once its transcript is somewhere the service can reach."
-                  />
+                  @if (runnerPlaced()) {
+                    <app-empty
+                      class="runner-transcripts"
+                      message="Archived transcripts are not available for runner-placed workspaces: the sessions ran on the runner's node, which the service does not read."
+                    />
+                  } @else {
+                    <app-empty
+                      message="No agent sessions could be read for this workspace. That is not the same as none having run: a session becomes readable only once its transcript is somewhere the service can reach."
+                    />
+                  }
                 } @else {
                   <ul class="sessions">
                     @for (session of list.value; track session.sessionId) {

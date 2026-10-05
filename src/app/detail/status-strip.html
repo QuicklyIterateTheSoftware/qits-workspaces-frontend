@@ -3,6 +3,9 @@
     <span class="key">Container</span>
     <span class="value">
       <qits-badge [label]="runtimeLabel()" [tone]="runtimeTone()" />
+      @if (placementNote(); as note) {
+        <span class="placement muted">{{ note }}</span>
+      }
       @if (workspace().runtimeError) {
         <span class="fault" role="alert">{{ workspace().runtimeError }}</span>
       }
@@ -13,7 +16,8 @@
           variant="secondary"
           size="sm"
           [busy]="pending() === 'stop'"
-          [disabled]="pending() !== null"
+          [disabled]="pending() !== null || unavailable() !== null"
+          [attr.title]="unavailable()"
           (pressed)="stop()"
           >Stop</qits-button
         >
@@ -22,7 +26,8 @@
           variant="secondary"
           size="sm"
           [busy]="pending() === 'start'"
-          [disabled]="pending() !== null"
+          [disabled]="pending() !== null || unavailable() !== null"
+          [attr.title]="unavailable()"
           (pressed)="start()"
           >Start</qits-button
         >
@@ -31,13 +36,18 @@
         variant="ghost"
         size="sm"
         [busy]="pending() === 'recreate'"
-        [disabled]="pending() !== null || recreateBlocked() !== null"
-        [attr.title]="recreateBlocked()"
+        [disabled]="pending() !== null || unavailable() !== null || recreateBlocked() !== null"
+        [attr.title]="unavailable() ?? recreateBlocked()"
         (pressed)="recreate()"
         >Recreate</qits-button
       >
     </span>
-    @if (recreateBlocked()) {
+    @if (unavailable(); as reason) {
+      <p class="note unavailable" role="alert">
+        Start, stop and recreate wait for the runner: {{ reason }}, and this workspace stays on it
+        rather than moving elsewhere.
+      </p>
+    } @else if (recreateBlocked()) {
       <p class="note">{{ recreateBlocked() }}</p>
     }
   </section>

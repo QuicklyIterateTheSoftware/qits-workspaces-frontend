@@ -75,6 +75,8 @@ describe('App', () => {
   it('routes the root URL to the workspace overview inside the shared layout', async () => {
     const harness = await RouterTestingHarness.create('/');
     http.expectOne(`${PROJECTS_ORIGIN}/projects/api/projects`).flush({ entries: [] });
+    // The overview asks the runner registry whether "Place on a runner" is offered.
+    http.expectOne('/workspaces/api/runners').flush([]);
     await harness.fixture.whenStable();
 
     const layout = harness.routeNativeElement;

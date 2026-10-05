@@ -258,4 +258,80 @@ describe('StatusStrip', () => {
       .flush({ success: true });
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
+  describe('a runner-placed workspace', () => {
+    const verb = (fixture: { nativeElement: HTMLElement }, label: string): HTMLButtonElement =>
+      Array.from(fixture.nativeElement.querySelectorAll('button')).find(
+        (button) => (button as HTMLButtonElement).textContent?.trim() === label,
+      ) as HTMLButtonElement;
+
+    const containerBadge = (fixture: { nativeElement: HTMLElement }): HTMLElement =>
+      fixture.nativeElement.querySelector(
+        'section[aria-label="Container"] qits-badge span',
+      ) as HTMLElement;
+
+    it('reads QUEUED as info and names the runner it waits on', async () => {
+      const fixture = await render({
+        placement: 'RUNNER',
+        runtimeStatus: 'QUEUED',
+        runner: { id: 'r-1', name: 'node-a' },
+        queuedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+        daemonConnectedAt: null,
+      });
+
+      expect(containerBadge(fixture).className).toContain('qits-badge-info');
+      expect(containerBadge(fixture).textContent).toContain('queued');
+      expect(text(fixture)).toContain('waiting for a slot on node-a since 5m ago');
+    });
+
+    it('says it waits for any runner when none has taken it yet', async () => {
+      const fixture = await render({
+        placement: 'RUNNER',
+        runtimeStatus: 'QUEUED',
+        runner: null,
+        queuedAt: null,
+        daemonConnectedAt: null,
+      });
+
+      expect(text(fixture)).toContain('waiting for a runner');
+      expect(text(fixture)).not.toContain('waiting for a slot on');
+    });
+
+    it('reads UNAVAILABLE as a warning, says the runner is offline, and disables the verbs', async () => {
+      const fixture = await render({
+        placement: 'RUNNER',
+        runtimeStatus: 'UNAVAILABLE',
+        runner: { id: 'r-1', name: 'node-a' },
+        clean: true,
+        daemonConnectedAt: null,
+      });
+
+      expect(containerBadge(fixture).className).toContain('qits-badge-warning');
+      expect(containerBadge(fixture).textContent).toContain('unavailable');
+      expect(text(fixture)).toContain('runner node-a is offline');
+      // Start (the row is not RUNNING) and Recreate, even with a provably clean tree.
+      for (const label of ['Start', 'Recreate']) {
+        expect(verb(fixture, label).disabled).toBe(true);
+        expect(verb(fixture, label).closest('qits-button')?.getAttribute('title')).toBe(
+          'runner node-a is offline',
+        );
+      }
+    });
+
+    it('names the runner a running workspace is on', async () => {
+      const fixture = await render({ placement: 'RUNNER', runner: { id: 'r-1', name: 'node-a' } });
+
+      expect(text(fixture)).toContain('on runner node-a');
+      expect(verb(fixture, 'Stop').disabled).toBe(false);
+    });
+
+    it('leaves a DIRECT row exactly as it was', async () => {
+      const before = await render({});
+      const direct = await render({ placement: 'DIRECT', runner: null, queuedAt: null });
+
+      expect(direct.nativeElement.innerHTML).toBe(before.nativeElement.innerHTML);
+      expect(direct.nativeElement.querySelector('.placement')).toBeNull();
+      expect(verb(direct, 'Stop').disabled).toBe(false);
+      expect(verb(direct, 'Recreate').disabled).toBe(false);
+    });
+  });
 });

@@ -179,6 +179,16 @@ export class WorkspaceDetailPage {
   protected readonly sessions = signal<Loadable<readonly WorkspaceAgentSessionDto[]>>(IDLE);
   protected readonly transcript = signal<Loadable<readonly string[]>>(IDLE);
 
+  /**
+   * Whether the resolved workspace ran on a workspace runner. Its transcripts were written to that
+   * runner's node, which the service cannot read, so its empty session list is a known limitation
+   * and is said as one rather than as "none could be read".
+   */
+  protected readonly runnerPlaced = computed(() => {
+    const history = this.history();
+    return history.kind === 'ready' && history.value.placement === 'RUNNER';
+  });
+
   /** Drawn where a session never wrote an ending. */
   protected readonly none = NONE;
 

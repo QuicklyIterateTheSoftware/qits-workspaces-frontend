@@ -27,6 +27,8 @@ const RUNTIME_TONES: Readonly<Record<string, QitsBadgeTone>> = {
   STOPPED: 'neutral',
   PROVISIONING: 'info',
   FAILED: 'danger',
+  QUEUED: 'info',
+  UNAVAILABLE: 'warning',
 };
 
 /**
@@ -64,6 +66,12 @@ const RUNTIME_TONES: Readonly<Record<string, QitsBadgeTone>> = {
  * terminal and the whole agent surface down with it — the reverse tunnel made that socket
  * load-bearing for the container proxy — and without a sentence here the only symptom is a wall of
  * identical 502s in seven panels.
+ *
+ * **A runner-placed workspace names its runner and says why it is waiting.** `QUEUED` is a start
+ * waiting for a slot — on its own runner, or on any runner when none has taken it yet — and
+ * `UNAVAILABLE` is a runner offline beyond its grace. A workspace is sticky to its runner, so the
+ * verbs cannot route anywhere else while it is gone: Start, Stop and Recreate are disabled with that
+ * sentence rather than offered and answered with a 409.
  *
  * **Mutations refresh on settled, not on success.** A failed start still changed something worth
  * re-reading, and the truth after a refusal is more useful than the stale row that produced it.
@@ -120,6 +128,45 @@ export class StatusStrip {
   );
 
   protected readonly running = computed(() => this.workspace().runtimeStatus === 'RUNNING');
+
+  /** The runner this workspace is placed on, by name; null for a DIRECT row and an untaken one. */
+  protected readonly runnerName = computed(() =>
+    this.workspace().placement === 'RUNNER' ? (this.workspace().runner?.name ?? null) : null,
+  );
+
+  /**
+   * Where a runner-placed workspace stands and why, as one sentence; null for every DIRECT row, which
+   * renders exactly as it always did.
+   */
+  protected readonly placementNote = computed<string | null>(() => {
+    const workspace = this.workspace();
+    if (workspace.placement !== 'RUNNER') {
+      return null;
+    }
+    const runner = this.runnerName();
+    switch (workspace.runtimeStatus) {
+      case 'QUEUED': {
+        const since = workspace.queuedAt ? ` since ${relativeSince(workspace.queuedAt)}` : '';
+        return runner ? `waiting for a slot on ${runner}${since}` : `waiting for a runner${since}`;
+      }
+      case 'UNAVAILABLE':
+        return this.unavailable();
+      default:
+        return runner ? `on runner ${runner}` : 'placed on a runner';
+    }
+  });
+
+  /**
+   * Why no verb can be pressed: the owning runner is offline, and the workspace is sticky to it.
+   * Null unless the row is `UNAVAILABLE`.
+   */
+  protected readonly unavailable = computed<string | null>(() => {
+    if (this.workspace().runtimeStatus !== 'UNAVAILABLE') {
+      return null;
+    }
+    const runner = this.workspace().runner?.name;
+    return runner ? `runner ${runner} is offline` : 'its runner is offline';
+  });
 
   protected readonly drift = computed(() => {
     const workspace = this.workspace();

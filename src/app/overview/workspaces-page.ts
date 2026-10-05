@@ -18,8 +18,10 @@ import {
 } from '@qits/ui-components';
 import type { ProjectDto, RepositoryDto, WorkspaceDto } from '../api/dto';
 import { ProjectsApi } from '../api/projects-api';
+import { RunnersApi } from '../api/runners-api';
 import { WorkspacesApi } from '../api/workspaces-api';
 import { serverMessage } from '../ui/loadable';
+import { Viewer } from '../ui/viewer';
 import {
   workspaceSubject,
   workspaceSubjectLabel,
@@ -63,6 +65,12 @@ interface Choice {
  * starts unticked on every press, is never remembered, and the list marks the workspaces that hold
  * it: a privilege nobody can see is one nobody gives back.
  *
+ * **"Place on a runner" asks for a workspace runner's node instead of the platform host.** It is
+ * an admin's choice, offered only while the runner registry lists a runner able to take one, and it
+ * excludes the docker socket: an admin-mode container holds the host's socket, so it stays on the
+ * host. Ticked, the create sends `placement: 'RUNNER'`; unticked it sends nothing, which the service
+ * reads as `DIRECT`. The list marks every runner-placed row with its runner.
+ *
  * **Create is three steps in a fixed order**: the service forks the branch tree, the container is
  * then asked to start, and only then does the page navigate to the detail view — which is where the
  * starting process is actually watched. Navigating first would leave the container unstarted if the
@@ -83,6 +91,10 @@ export class WorkspacesPage implements OnInit {
   private readonly qitsScope = inject(QITS_SCOPE);
   private readonly appLinks = inject(QitsAppLinks);
   private readonly qitsRepositories = inject(QITS_REPOSITORIES);
+  private readonly runnersApi = inject(RunnersApi);
+
+  /** Whether the viewer may ask for admin-only postures — today, a runner placement. */
+  protected readonly viewerAdmin = inject(Viewer).admin;
 
   protected readonly choices = signal<readonly Choice[]>([]);
 
@@ -107,6 +119,19 @@ export class WorkspacesPage implements OnInit {
    * nobody thought about.
    */
   protected admin = false;
+
+  /**
+   * The "Place on a runner" checkbox. Like {@link admin}, answered per workspace and never
+   * remembered — and the two exclude each other, so ticking one disables the other.
+   */
+  protected placeOnRunner = false;
+
+  /**
+   * Whether the runner registry lists a runner that can take a workspace now. The option is not
+   * drawn without one: the service would refuse the create with `NO_RUNNER`, and a box that can only
+   * produce a refusal is not an option.
+   */
+  protected readonly runnerEligible = signal(false);
 
   /** Where this page's own links start — bare, or under the repository the reader came in through. */
   protected readonly home = computed<string[]>(() => [...scopeCommands(this.qitsScope.scope())]);
@@ -188,6 +213,7 @@ export class WorkspacesPage implements OnInit {
   }
 
   async ngOnInit(): Promise<void> {
+    void this.loadRunnerEligibility();
     try {
       const projects = await this.projectsApi.projects();
       const candidates = await Promise.all(
@@ -222,6 +248,24 @@ export class WorkspacesPage implements OnInit {
     } finally {
       this.loading.set(false);
     }
+  }
+
+  /** Reads the runner list once, for admins only; a failed read just keeps the option hidden. */
+  private async loadRunnerEligibility(): Promise<void> {
+    if (!this.viewerAdmin()) {
+      return;
+    }
+    try {
+      const runners = await this.runnersApi.runners();
+      this.runnerEligible.set(runners.some((runner) => runner.eligible));
+    } catch {
+      this.runnerEligible.set(false);
+    }
+  }
+
+  /** Whether this press asks for a runner: ticked, offered, and not overruled by admin mode. */
+  private placesOnRunner(): boolean {
+    return this.placeOnRunner && !this.admin && this.viewerAdmin() && this.runnerEligible();
   }
 
   protected async selectionChanged(): Promise<void> {
@@ -260,6 +304,8 @@ export class WorkspacesPage implements OnInit {
         // than omitted-when-false so the request says what was asked for either way; the service
         // reads a missing field as no, which is what every other caller relies on.
         admin: this.admin,
+        // Only when asked for: an absent placement is DIRECT, which is every other caller's.
+        ...(this.placesOnRunner() ? { placement: 'RUNNER' as const } : {}),
       });
       await this.workspacesApi.ensureContainer(created.id);
       await this.router.navigate([
