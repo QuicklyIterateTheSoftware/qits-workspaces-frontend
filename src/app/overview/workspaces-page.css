@@ -97,6 +97,11 @@ button:disabled {
   align-items: flex-start;
   line-height: 1.4;
 }
+/* The second option ("Place on a runner") takes the next row: two labels on the same explicit row
+ * would stack on top of each other, one hiding the other. */
+.checkbox ~ .checkbox {
+  grid-row: 3;
+}
 .checkbox input {
   min-height: 0;
   width: 1rem;
@@ -172,6 +177,7 @@ li span {
   }
   /* One column: the placement above would put the button back on the checkbox's row. */
   .checkbox,
+  .checkbox ~ .checkbox,
   form > button {
     grid-column: auto;
     grid-row: auto;
