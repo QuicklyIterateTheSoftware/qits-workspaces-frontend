@@ -266,3 +266,128 @@ h2 {
   margin: 0.3rem 0 0;
   padding-left: 1.2rem;
 }
+
+/* Health: badge + per-check list + node-details toggle, same register as .login. */
+.health {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  background: #f9fafb;
+  border: 1px solid #f3f4f6;
+  border-radius: 0.375rem;
+  font-size: 0.85rem;
+}
+
+.health-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.health-title {
+  color: #374151;
+  font-weight: 600;
+}
+
+.checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.25rem;
+}
+
+/* A failing check's row is tinted so it reads at a glance among the rest. */
+.check-failed {
+  background: #fef2f2;
+}
+
+.check-name {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  color: #374151;
+  min-width: 7rem;
+}
+
+.check-detail {
+  overflow-wrap: anywhere;
+}
+
+.node-details {
+  margin-top: 0.3rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.node-details h3 {
+  margin: 0.5rem 0 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.runner-container {
+  margin: 0;
+  color: #6b7280;
+}
+
+.inventory-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.inventory-table th,
+.inventory-table td {
+  text-align: left;
+  padding: 0.2rem 0.4rem;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.inventory-table th {
+  color: #6b7280;
+  font-weight: 600;
+}
+
+.other-check {
+  margin-top: 0.4rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.entries {
+  flex-basis: 100%;
+  margin: 0.2rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.9rem;
+}
+
+.entry {
+  display: flex;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+}
+
+.entry dt {
+  color: #6b7280;
+}
+
+.entry dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

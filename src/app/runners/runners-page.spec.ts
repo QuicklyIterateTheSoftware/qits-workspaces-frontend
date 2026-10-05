@@ -326,6 +326,123 @@ describe('RunnersPage', () => {
       check.flush(null, { status: 202, statusText: 'Accepted' });
       await settle(fixture);
     });
+
+    it('renders the last health check\'s per-check list, highlighting a failing one', async () => {
+      const fixture = await open([
+        runner({
+          health: {
+            at: '2026-10-05T10:00:00Z',
+            ok: false,
+            detail: 'one check failed',
+            checks: [
+              { name: 'dockerPing', ok: true, detail: 'docker responded' },
+              { name: 'nodeInventory', ok: false, detail: 'image pull failed' },
+            ],
+          },
+        }),
+      ]);
+
+      const health = element(fixture).querySelector('.health')!;
+      expect(health.textContent).toContain('health check failed');
+      const checks = Array.from(health.querySelectorAll('.check'));
+      expect(checks).toHaveLength(2);
+
+      const passing = checks.find((row) => row.textContent?.includes('dockerPing'))!;
+      expect(passing.classList.contains('check-failed')).toBe(false);
+      expect(passing.textContent).toContain('passed');
+
+      const failing = checks.find((row) => row.textContent?.includes('nodeInventory'))!;
+      expect(failing.classList.contains('check-failed')).toBe(true);
+      expect(failing.textContent).toContain('failed');
+      expect(failing.textContent).toContain('image pull failed');
+    });
+
+    it('renders the plain health badge as before when the server sends no `health`', async () => {
+      const fixture = await open([
+        runner({
+          health: undefined,
+          lastHealthCheckAt: '2026-10-05T09:30:00Z',
+          lastHealthCheckOk: true,
+        }),
+      ]);
+
+      const health = element(fixture).querySelector('.health')!;
+      expect(health.textContent).toContain('health check passed');
+      expect(health.querySelectorAll('.check')).toHaveLength(0);
+    });
+
+    it('runs an on-demand health check, and shows the 409 reason when the runner is unavailable', async () => {
+      const fixture = await open([runner()]);
+
+      button(fixture, 'Run health check').click();
+      await settle(fixture);
+
+      const check = http.expectOne(`${RUNNERS_URL}/r-1/healthcheck`);
+      expect(check.request.method).toBe('POST');
+      check.flush(
+        { message: 'RUNNER_UNAVAILABLE: runner node-a is not connected', code: 'RUNNER_UNAVAILABLE' },
+        { status: 409, statusText: 'Conflict' },
+      );
+      await settle(fixture);
+
+      const health = element(fixture).querySelector('.health')!;
+      expect(health.textContent).toContain('This runner is not connected right now.');
+    });
+
+    it("loads and renders a runner's node details on request", async () => {
+      const fixture = await open([runner()]);
+
+      button(fixture, 'Node details').click();
+      await settle(fixture);
+
+      const detail = http.expectOne(`${RUNNERS_URL}/r-1/health`);
+      expect(detail.request.method).toBe('GET');
+      detail.flush({
+        at: '2026-10-05T10:00:00Z',
+        ok: true,
+        detail: 'all checks passed',
+        requestId: 'req-1',
+        checks: [
+          {
+            name: 'nodeInventory',
+            ok: true,
+            detail: 'inventory read',
+            data: {
+              containers: [
+                {
+                  name: 'workspace-task-x',
+                  id: 'c1',
+                  rowId: '12',
+                  state: 'running',
+                  startedAt: '2026-10-05T09:00:00Z',
+                  finishedAt: null,
+                  exitCode: null,
+                  image: 'qits/workspace:2026.1003.1',
+                },
+              ],
+              volumes: [{ name: 'qits-workspace-task-x', rowId: '12', createdAt: '2026-10-04T09:00:00Z' }],
+              runnerContainer: {
+                name: 'qits-workspaces-runner',
+                id: 'rc1',
+                version: '2026.1003.1',
+                startedAt: '2026-10-05T08:00:00Z',
+              },
+            },
+          },
+          { name: 'diskSpace', ok: true, detail: 'plenty free', data: { freeBytes: 123456 } },
+        ],
+      });
+      await settle(fixture);
+
+      const nodeDetails = element(fixture).querySelector('.node-details')!;
+      expect(nodeDetails.textContent).toContain('workspace-task-x');
+      expect(nodeDetails.textContent).toContain('qits/workspace:2026.1003.1');
+      expect(nodeDetails.textContent).toContain('qits-workspace-task-x');
+      expect(nodeDetails.textContent).toContain('qits-workspaces-runner');
+      expect(nodeDetails.textContent).toContain('diskSpace');
+      expect(nodeDetails.textContent).toContain('freeBytes');
+      expect(nodeDetails.textContent).toContain('123456');
+    });
   });
 
   describe('as a viewer who is not an admin', () => {

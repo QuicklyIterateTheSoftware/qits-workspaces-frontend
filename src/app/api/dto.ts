@@ -718,6 +718,90 @@ export interface WorkspaceRunnerDto {
   readonly loginCommand: string | null;
   readonly kimiLoginCommand: string | null;
   readonly loginCommandPending?: boolean;
+  readonly health?: WorkspaceRunnerHealthDto | null;
+}
+
+/**
+ * One named check inside a runner's last health result, as the runner list carries it — the
+ * check's own structured `data` (qits-862, e.g. `nodeInventory`'s containers and volumes) is not
+ * repeated here; {@link WorkspaceRunnerHealthCheckDetailDto} is where that lives.
+ */
+export interface WorkspaceRunnerHealthCheckDto {
+  readonly name: string;
+  readonly ok: boolean;
+  readonly detail: string;
+}
+
+/**
+ * The last health check qits-workspaces ran against a runner, mirroring qits-ci's runner health.
+ * Optional on {@link WorkspaceRunnerDto} and absent on a server older than qits-862; `null` for a
+ * runner never checked.
+ */
+export interface WorkspaceRunnerHealthDto {
+  readonly at: string;
+  readonly ok: boolean;
+  readonly detail: string;
+  readonly checks: readonly WorkspaceRunnerHealthCheckDto[];
+}
+
+/** What queuing an on-demand health check answers: the id the result is read back by. */
+export interface RunnerHealthcheckResponse {
+  readonly requestId: string;
+}
+
+/** The containers `GET …/health`'s `nodeInventory` check reports, one per container on the node. */
+export interface NodeInventoryContainerDto {
+  readonly name: string;
+  readonly id: string;
+  readonly rowId: string | null;
+  readonly state: string;
+  readonly startedAt: string | null;
+  readonly finishedAt: string | null;
+  readonly exitCode: number | null;
+  readonly image: string;
+}
+
+/** One volume `nodeInventory` reports. */
+export interface NodeInventoryVolumeDto {
+  readonly name: string;
+  readonly rowId: string | null;
+  readonly createdAt: string | null;
+}
+
+/** The runner's own container, as `nodeInventory` reports it. */
+export interface NodeInventoryRunnerContainerDto {
+  readonly name: string;
+  readonly id: string;
+  readonly version: string | null;
+  readonly startedAt: string | null;
+}
+
+/** The `nodeInventory` check's `data` — the node's containers, volumes and the runner's own container. */
+export interface NodeInventoryDto {
+  readonly containers: readonly NodeInventoryContainerDto[];
+  readonly volumes: readonly NodeInventoryVolumeDto[];
+  readonly runnerContainer: NodeInventoryRunnerContainerDto | null;
+}
+
+/**
+ * One check as `GET /workspaces/api/runners/{id}/health` carries it — the same fields as
+ * {@link WorkspaceRunnerHealthCheckDto}, plus whatever structured data that check gathered.
+ * `nodeInventory`'s is {@link NodeInventoryDto}; every other check's is read generically.
+ */
+export interface WorkspaceRunnerHealthCheckDetailDto {
+  readonly name: string;
+  readonly ok: boolean;
+  readonly detail: string;
+  readonly data: unknown;
+}
+
+/** The full detail `GET /workspaces/api/runners/{id}/health` answers. */
+export interface WorkspaceRunnerHealthDetailDto {
+  readonly at: string;
+  readonly ok: boolean;
+  readonly detail: string;
+  readonly requestId: string;
+  readonly checks: readonly WorkspaceRunnerHealthCheckDetailDto[];
 }
 
 /** What a runner create takes. Slots are the containers it may run at once. */

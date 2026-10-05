@@ -16,7 +16,15 @@ import {
   scopeCommands,
   type QitsBadgeTone,
 } from '@qits/ui-components';
-import type { RunnerLoginPresence, RunnerRegistrationDto, WorkspaceRunnerDto } from '../api/dto';
+import type {
+  NodeInventoryDto,
+  RunnerLoginPresence,
+  RunnerRegistrationDto,
+  WorkspaceRunnerDto,
+  WorkspaceRunnerHealthCheckDetailDto,
+  WorkspaceRunnerHealthCheckDto,
+  WorkspaceRunnerHealthDetailDto,
+} from '../api/dto';
 import { ProjectsApi } from '../api/projects-api';
 import { RunnersApi } from '../api/runners-api';
 import { WorkspacesApi } from '../api/workspaces-api';
@@ -44,6 +52,15 @@ const MIN_SLOTS = 0;
 
 /** The refusal a delete answers while the runner still owns an ACTIVE workspace. */
 const OWNS_WORKSPACES = 'RUNNER_OWNS_WORKSPACES';
+
+/** The refusal an on-demand health check answers while the runner holds no socket to be asked over. */
+const RUNNER_UNAVAILABLE = 'RUNNER_UNAVAILABLE';
+
+/** The sentence shown for {@link RUNNER_UNAVAILABLE}, in place of the server's bare code. */
+const RUNNER_UNAVAILABLE_MESSAGE = 'This runner is not connected right now.';
+
+/** The name `nodeInventory`'s check carries — the one check this page renders specially. */
+const NODE_INVENTORY_CHECK = 'nodeInventory';
 
 /** The sentence for a quarantined runner the service gave no reason for — a new one. */
 const AWAITING_FIRST_HEALTHCHECK = 'awaiting its first health check';
@@ -109,6 +126,26 @@ function owningWorkspaceIds(error: unknown): readonly number[] | null {
     : [];
 }
 
+/**
+ * The friendly sentence for an on-demand health check refused with {@link RUNNER_UNAVAILABLE} —
+ * the runner is registered but not connected right now, so there is no socket to send the check
+ * over. `null` when this was some other failure, which falls back to the generic rendering.
+ */
+function runnerUnavailableMessage(error: unknown): string | null {
+  if (!(error instanceof HttpErrorResponse) || error.status !== 409) {
+    return null;
+  }
+  const body: unknown = error.error;
+  if (typeof body !== 'object' || body === null) {
+    return null;
+  }
+  const { code, message } = body as { code?: unknown; message?: unknown };
+  const matches =
+    code === RUNNER_UNAVAILABLE ||
+    (typeof message === 'string' && message.includes(RUNNER_UNAVAILABLE));
+  return matches ? RUNNER_UNAVAILABLE_MESSAGE : null;
+}
+
 /** The once-only panel: whose registration it is, and the two things that are never answered again. */
 interface InstallPanel {
   readonly runnerName: string;
@@ -128,6 +165,67 @@ export interface OwningWorkspace {
 interface EditDraft {
   readonly slots: number;
   readonly description: string;
+}
+
+/** One check, drawn as a badge plus its detail sentence. */
+interface CheckDisplay {
+  readonly name: string;
+  readonly label: string;
+  readonly tone: QitsBadgeTone;
+  readonly detail: string;
+}
+
+/** `check.ok` drawn `passed`/success or `failed`/danger — the same vocabulary the overall badge uses. */
+function checkDisplayOf(check: WorkspaceRunnerHealthCheckDto): CheckDisplay {
+  return {
+    name: check.name,
+    label: check.ok ? 'passed' : 'failed',
+    tone: check.ok ? 'success' : 'danger',
+    detail: check.detail,
+  };
+}
+
+/** A flat `key: value` pair, for a check's `data` this page does not render a dedicated table for. */
+type CompactEntry = readonly [key: string, value: string];
+
+/** `data` read as compact entries — nested objects and arrays stringified rather than walked further. */
+function compactEntriesOf(data: unknown): readonly CompactEntry[] {
+  if (typeof data !== 'object' || data === null) {
+    return data === undefined ? [] : [['value', String(data)]];
+  }
+  return Object.entries(data as Record<string, unknown>).map(([key, value]) => [
+    key,
+    typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value),
+  ]);
+}
+
+/** The node-details panel's content: `nodeInventory` rendered as tables, every other check compactly. */
+interface NodeDetailsDisplay {
+  readonly inventory: NodeInventoryDto | null;
+  readonly otherChecks: readonly {
+    readonly name: string;
+    readonly check: CheckDisplay;
+    readonly entries: readonly CompactEntry[];
+  }[];
+}
+
+/** Splits a health detail's checks into {@link NODE_INVENTORY_CHECK} and everything else. */
+function nodeDetailsDisplayOf(detail: WorkspaceRunnerHealthDetailDto): NodeDetailsDisplay {
+  const inventoryCheck = detail.checks.find(
+    (check): check is WorkspaceRunnerHealthCheckDetailDto => check.name === NODE_INVENTORY_CHECK,
+  );
+  const inventory =
+    inventoryCheck && typeof inventoryCheck.data === 'object' && inventoryCheck.data !== null
+      ? (inventoryCheck.data as NodeInventoryDto)
+      : null;
+  const otherChecks = detail.checks
+    .filter((check) => check.name !== NODE_INVENTORY_CHECK)
+    .map((check) => ({
+      name: check.name,
+      check: checkDisplayOf(check),
+      entries: compactEntriesOf(check.data),
+    }));
+  return { inventory, otherChecks };
 }
 
 /**
@@ -234,6 +332,29 @@ export class RunnersPage {
   /** Per runner, the error of its last login re-check — shown inside its login panel. */
   protected readonly loginError = signal<ReadonlyMap<string, string>>(new Map());
 
+  // --- the on-demand health check, and the node-details panel it feeds ---
+
+  /**
+   * Runner ids with a health check this page itself just queued, mapped to the `health.at` (or the
+   * legacy `lastHealthCheckAt`) seen at the moment it was queued — `null` when there was none yet.
+   * A row's "Run health check" button stays disabled for as long as its entry survives here;
+   * dropped once a fresher check lands (or the runner is gone), the same scheme qits-ci-frontend's
+   * runners page uses, rather than a timer this page would have to guess a duration for.
+   */
+  protected readonly healthchecking = signal<ReadonlyMap<string, string | null>>(new Map());
+
+  /** The on-demand health check's own error — separate from {@link rowError}, since the button that
+   *  can trigger it lives outside the row's Actions menu and must show its refusal with it. */
+  protected readonly healthcheckError = signal('');
+
+  /** One row's node-details panel open at a time, keyed by runner id; `null` means none is. */
+  protected readonly nodeDetailsOpen = signal<string | null>(null);
+
+  /** Per runner, the node-details panel's own load — read lazily, the first time the panel opens. */
+  protected readonly nodeDetails = signal<
+    ReadonlyMap<string, Loadable<WorkspaceRunnerHealthDetailDto>>
+  >(new Map());
+
   private pollHandle: ReturnType<typeof setInterval> | null = null;
   private inFlight = false;
 
@@ -260,8 +381,10 @@ export class RunnersPage {
   protected async load(): Promise<void> {
     this.runners.set(LOADING);
     try {
-      this.runners.set(ready(sortRunners(await this.api.runners())));
+      const runners = sortRunners(await this.api.runners());
+      this.runners.set(ready(runners));
       this.now.set(new Date());
+      this.reconcileHealthchecking(runners);
     } catch (error) {
       this.runners.set(failed(error));
     }
@@ -273,12 +396,39 @@ export class RunnersPage {
     }
     this.inFlight = true;
     try {
-      this.runners.set(ready(sortRunners(await this.api.runners())));
+      const runners = sortRunners(await this.api.runners());
+      this.runners.set(ready(runners));
       this.now.set(new Date());
+      this.reconcileHealthchecking(runners);
     } catch {
       // The last list stays on screen; one missed poll is not worth a banner.
     } finally {
       this.inFlight = false;
+    }
+  }
+
+  /**
+   * Drops a row's pending health-check flag once a fresher check than the one seen at click time
+   * lands, or once the runner is gone — see {@link healthchecking}.
+   */
+  private reconcileHealthchecking(runners: readonly WorkspaceRunnerDto[]): void {
+    const pending = this.healthchecking();
+    if (pending.size === 0) {
+      return;
+    }
+    const byId = new Map(runners.map((runner) => [runner.id, runner] as const));
+    const next = new Map(pending);
+    let changed = false;
+    for (const [id, seenAt] of pending) {
+      const runner = byId.get(id);
+      const currentAt = runner ? this.healthCheckAt(runner) : null;
+      if (!runner || currentAt !== seenAt) {
+        next.delete(id);
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.healthchecking.set(next);
     }
   }
 
@@ -318,13 +468,38 @@ export class RunnersPage {
     return runner.quarantineReason ?? AWAITING_FIRST_HEALTHCHECK;
   }
 
+  /**
+   * The overall badge for a runner's last health check. `runner.health` (qits-862) is preferred
+   * when the server sends it; a server that predates it sends neither `health` nor anything this
+   * page could build a per-check list from, so that case falls back to the plain
+   * `lastHealthCheckOk` badge it always drew — the same rendering as before this field existed.
+   */
   protected healthCheck(runner: WorkspaceRunnerDto): Badge | null {
+    if (runner.health) {
+      return runner.health.ok
+        ? { label: 'health check passed', tone: 'success' }
+        : { label: 'health check failed', tone: 'danger' };
+    }
     if (runner.lastHealthCheckOk === null) {
       return null;
     }
     return runner.lastHealthCheckOk
       ? { label: 'health check passed', tone: 'success' }
       : { label: 'health check failed', tone: 'danger' };
+  }
+
+  /** When the badge {@link healthCheck} draws was last taken — `runner.health`'s, or the legacy field. */
+  protected healthCheckAt(runner: WorkspaceRunnerDto): string | null {
+    return runner.health?.at ?? runner.lastHealthCheckAt;
+  }
+
+  /** The per-check list under the badge — empty when the server sent no `health` (yet, or ever). */
+  protected checks(runner: WorkspaceRunnerDto): readonly CheckDisplay[] {
+    return (runner.health?.checks ?? []).map(checkDisplayOf);
+  }
+
+  protected isHealthchecking(runner: WorkspaceRunnerDto): boolean {
+    return this.healthchecking().has(runner.id);
   }
 
   // --- creating a runner ---
@@ -449,10 +624,79 @@ export class RunnersPage {
     );
   }
 
+  /**
+   * Queue a health check on demand. The button disables for as long as {@link isHealthchecking}
+   * says it is pending — cleared by {@link reconcileHealthchecking} once a fresher result lands with
+   * a later poll, not by this call's own round trip, since the check itself runs on the runner's
+   * node and the POST only queues it. A 409 ({@link RUNNER_UNAVAILABLE}) means the runner is not
+   * connected right now; that sentence is shown rather than the bare code.
+   */
   protected async runHealthCheck(runner: WorkspaceRunnerDto): Promise<void> {
-    await this.act('healthcheck', 'Could not run a health check', () =>
-      this.api.healthCheck(runner.id),
+    if (this.isHealthchecking(runner)) {
+      return;
+    }
+    this.healthcheckError.set('');
+    this.healthchecking.update((map) =>
+      new Map(map).set(runner.id, this.healthCheckAt(runner)),
     );
+    try {
+      await this.api.healthCheck(runner.id);
+    } catch (error) {
+      this.viewer.noteRefusal(error);
+      this.healthcheckError.set(
+        runnerUnavailableMessage(error) ?? `Could not run a health check — ${describeError(error)}.`,
+      );
+      this.healthchecking.update((map) => {
+        const next = new Map(map);
+        next.delete(runner.id);
+        return next;
+      });
+    }
+  }
+
+  // --- node details: the other half of a health result, loaded lazily per row ---
+
+  protected isNodeDetailsOpen(runner: WorkspaceRunnerDto): boolean {
+    return this.nodeDetailsOpen() === runner.id;
+  }
+
+  protected nodeDetailsState(
+    runner: WorkspaceRunnerDto,
+  ): Loadable<WorkspaceRunnerHealthDetailDto> {
+    return this.nodeDetails().get(runner.id) ?? LOADING;
+  }
+
+  /** `nodeInventory`'s containers/volumes, and every other check's `data` compactly — once loaded. */
+  protected nodeDetailsDisplay(detail: WorkspaceRunnerHealthDetailDto): NodeDetailsDisplay {
+    return nodeDetailsDisplayOf(detail);
+  }
+
+  /** Opens the panel and, the first time, loads it; closing never drops what was already read. */
+  protected async toggleNodeDetails(runner: WorkspaceRunnerDto): Promise<void> {
+    if (this.isNodeDetailsOpen(runner)) {
+      this.nodeDetailsOpen.set(null);
+      return;
+    }
+    this.nodeDetailsOpen.set(runner.id);
+    await this.loadNodeDetails(runner);
+  }
+
+  protected async retryNodeDetails(runner: WorkspaceRunnerDto): Promise<void> {
+    await this.loadNodeDetails(runner);
+  }
+
+  private async loadNodeDetails(runner: WorkspaceRunnerDto): Promise<void> {
+    const state = this.nodeDetails().get(runner.id);
+    if (state && (state.kind === 'ready' || state.kind === 'loading')) {
+      return;
+    }
+    this.nodeDetails.update((map) => new Map(map).set(runner.id, LOADING));
+    try {
+      const detail = await this.api.health(runner.id);
+      this.nodeDetails.update((map) => new Map(map).set(runner.id, ready(detail)));
+    } catch (error) {
+      this.nodeDetails.update((map) => new Map(map).set(runner.id, failed(error)));
+    }
   }
 
   protected askDelete(): void {
