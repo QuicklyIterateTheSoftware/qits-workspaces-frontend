@@ -304,7 +304,7 @@ describe('WorkspacesPage', () => {
     expect(select?.value).toBe('qits-qits');
   });
 
-  it('creates the branch tree, starts the container, and then opens the workspace', async () => {
+  it('creates the branch tree in one request, and then opens the workspace', async () => {
     const component = await open();
 
     await submit(component);
@@ -321,12 +321,12 @@ describe('WorkspacesPage', () => {
       // Untouched checkbox, and the request says so rather than staying silent about it.
       admin: false,
     });
-    create.flush({ workspace: workspace() });
+    // The create starts the workspace too (qits-853) and answers the start's process beside it.
+    create.flush({ workspace: workspace(), technicalProcessId: 'p-1', startError: null });
     await settle(component);
 
-    http.expectOne('/workspaces/api/workspaces/12/ensure-container').flush({});
-    await settle(component);
-
+    // No second call: the detail page finds the running start through its own active-process read.
+    http.expectNone('/workspaces/api/workspaces/12/ensure-container');
     expect(TestBed.inject(Location).path()).toBe('/repositories/qits-qits/workspaces/12');
   });
 
@@ -349,9 +349,6 @@ describe('WorkspacesPage', () => {
     const create = http.expectOne('/workspaces/api/workspaces');
     expect((create.request.body as { admin: boolean }).admin).toBe(true);
     create.flush({ workspace: workspace({ admin: true }) });
-    await settle(component);
-
-    http.expectOne('/workspaces/api/workspaces/12/ensure-container').flush({});
     await settle(component);
   });
 
@@ -434,10 +431,15 @@ describe('WorkspacesPage', () => {
         admin: false,
         placement: 'RUNNER',
       });
-      create.flush({ workspace: workspace({ placement: 'RUNNER', runtimeStatus: 'QUEUED' }) });
+      // The create is the request a runner takes: the row comes back QUEUED, with no process.
+      create.flush({
+        workspace: workspace({ placement: 'RUNNER', runtimeStatus: 'QUEUED' }),
+        technicalProcessId: null,
+        startError: null,
+      });
       await settle(component);
-      http.expectOne('/workspaces/api/workspaces/12/ensure-container').flush({});
-      await settle(component);
+      http.expectNone('/workspaces/api/workspaces/12/ensure-container');
+      expect(TestBed.inject(Location).path()).toBe('/repositories/qits-qits/workspaces/12');
     });
 
     it('is never offered to a viewer who is not an admin, who does not even ask', async () => {

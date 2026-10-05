@@ -84,6 +84,8 @@ export class WorkspacesApi {
    * route worth remembering: the listing above scopes by a query parameter, the create does not.
    * The service reads the field from the payload and answers 400 without it.
    *
+   * The create also STARTS the workspace (qits-853): nothing needs `ensureContainer` afterwards.
+   *
    * Rejects with the `HttpErrorResponse`. A 409 here means the branch already has an active
    * workspace, which is the race a second press produces — so the caller re-reads the list rather
    * than retrying.

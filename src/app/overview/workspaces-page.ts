@@ -307,7 +307,9 @@ export class WorkspacesPage implements OnInit {
         // Only when asked for: an absent placement is DIRECT, which is every other caller's.
         ...(this.placesOnRunner() ? { placement: 'RUNNER' as const } : {}),
       });
-      await this.workspacesApi.ensureContainer(created.id);
+      // No second call: creating a workspace starts it (qits-853) — a DIRECT row's container is
+      // already coming up, and a RUNNER row is already queued for a runner. The detail page finds
+      // the running start through its own active-process read.
       await this.router.navigate([
         ...this.home(),
         'repositories',

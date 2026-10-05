@@ -635,9 +635,20 @@ export interface CreateWorkspaceRequest {
   readonly placement?: WorkspacePlacement;
 }
 
-/** What a create answers: the workspace it just made. */
+/**
+ * What a create answers: the workspace it just made, and the start the create ran on it — creating
+ * a workspace starts it, so there is no second call to make.
+ */
 export interface CreateWorkspaceResponse {
   readonly workspace: WorkspaceDto;
+  /**
+   * A DIRECT workspace's start, the same technical process `ensure-container` answers. Null for a
+   * RUNNER workspace, which the create wrote QUEUED and whose runtime status is its progress.
+   * Optional: a service from before the create started anything sends no such field.
+   */
+  readonly technicalProcessId?: string | null;
+  /** Why the start was refused after the row was written; the workspace exists regardless. */
+  readonly startError?: string | null;
 }
 
 /**
