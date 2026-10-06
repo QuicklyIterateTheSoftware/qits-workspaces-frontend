@@ -22,12 +22,34 @@ import { RunnersApi } from '../api/runners-api';
 import { WorkspacesApi } from '../api/workspaces-api';
 import { serverMessage } from '../ui/loadable';
 import { Viewer } from '../ui/viewer';
+import { isDirectRegular, isDirty, isUnpushed } from '../ui/workspace-placement';
 import {
   workspaceSubject,
   workspaceSubjectLabel,
   workspaceSubjectPath,
   type WorkspaceSubject,
 } from '../ui/workspace-subject';
+
+/**
+ * The platform-host banner's two counts, over the DIRECT regular rows this page is already
+ * showing.
+ *
+ * **The two counts are not a partition of `total`.** A row that is `RUNNING`, clean and pushed (or
+ * simply `RUNNING` with pushed unknown — the service starts it before moving it, so that is not a
+ * blocker) needs neither count: it can be moved right now, which is what the per-row badge already
+ * says, and the banner has nothing further to warn about for it.
+ *
+ * - `needsCleanPush` — `RUNNING` rows that are dirty or reported unpushed. These refuse the move
+ *   outright until somebody acts on the branch.
+ * - `stopped` — every row that is not `RUNNING`: `STOPPED`, `PROVISIONING`, `FAILED`, or a runtime
+ *   this page has never heard of (`null`). None of those answer `clean`/`pushed` reliably either,
+ *   so "stopped" is the one word that covers all of them without overclaiming which.
+ */
+interface PlatformHostBanner {
+  readonly total: number;
+  readonly needsCleanPush: number;
+  readonly stopped: number;
+}
 
 /** One project's wrapper repository, named as the picker shows it. */
 interface Choice {
@@ -75,6 +97,13 @@ interface Choice {
  * then asked to start, and only then does the page navigate to the detail view — which is where the
  * starting process is actually watched. Navigating first would leave the container unstarted if the
  * second request never went out.
+ *
+ * **A handful of regular rows are still DIRECT, "on the platform host", and this list says so
+ * twice.** Each such row carries its own badge, and a banner above the whole list — while any exist
+ * — counts how many need attention before they can move: see {@link PlatformHostBanner}. The
+ * banner's own link is a local, free-standing filter (it dies with the page, like the services
+ * panel's own service-scope filter) that narrows the list to exactly the rows the badge marks,
+ * rather than a second request — every row needed for it is already on screen.
  */
 @Component({
   selector: 'app-workspaces-page',
@@ -132,6 +161,64 @@ export class WorkspacesPage implements OnInit {
    * produce a refusal is not an option.
    */
   protected readonly runnerEligible = signal(false);
+
+  /** A plain property reference so the template can call the shared predicate on each row. */
+  protected readonly isDirectRegular = isDirectRegular;
+
+  /**
+   * The banner's own filter: whether the list below is narrowed to the DIRECT regular rows.
+   *
+   * **Local and free-standing, like the services panel's own service-scope filter** — it dies with
+   * this page and is never written to the URL, because it is a glance-and-forget narrowing over
+   * data already on screen rather than a link anybody would want to share.
+   */
+  protected readonly onlyPlatformHost = signal(false);
+
+  /**
+   * Every DIRECT regular row in the list on screen — the population the badge marks, the banner
+   * counts, and the filter narrows down to.
+   */
+  protected readonly platformHostRows = computed(() =>
+    this.workspaces().filter((workspace) => isDirectRegular(workspace)),
+  );
+
+  /** The rows actually drawn: every one, or only the platform-host rows once the filter is on. */
+  protected readonly visibleWorkspaces = computed(() =>
+    this.onlyPlatformHost() ? this.platformHostRows() : this.workspaces(),
+  );
+
+  /**
+   * The banner's two counts, or `null` while there is nothing to show one for. See {@link
+   * PlatformHostBanner} for exactly what `needsCleanPush` and `stopped` do and do not count.
+   */
+  protected readonly platformHostBanner = computed<PlatformHostBanner | null>(() => {
+    const rows = this.platformHostRows();
+    if (rows.length === 0) {
+      return null;
+    }
+    const needsCleanPush = rows.filter(
+      (workspace) =>
+        workspace.runtimeStatus === 'RUNNING' && (isDirty(workspace) || isUnpushed(workspace)),
+    ).length;
+    const stopped = rows.filter((workspace) => workspace.runtimeStatus !== 'RUNNING').length;
+    return { total: rows.length, needsCleanPush, stopped };
+  });
+
+  /**
+   * The banner's sentence, built from {@link platformHostBanner}. Every one of the three counts
+   * gets its own singular, because "1 are stopped" reads as broken as "1 workspace still run" does.
+   */
+  protected platformHostSentence(): string {
+    const banner = this.platformHostBanner();
+    if (!banner) {
+      return '';
+    }
+    const subject =
+      banner.total === 1 ? '1 workspace still runs' : `${banner.total} workspaces still run`;
+    const need = banner.needsCleanPush === 1 ? '1 needs' : `${banner.needsCleanPush} need`;
+    const stop = banner.stopped === 1 ? '1 is' : `${banner.stopped} are`;
+    return `${subject} on the platform host: ${need} a clean, pushed tree, ${stop} stopped.`;
+  }
 
   /** Where this page's own links start — bare, or under the repository the reader came in through. */
   protected readonly home = computed<string[]>(() => [...scopeCommands(this.qitsScope.scope())]);
@@ -341,6 +428,8 @@ export class WorkspacesPage implements OnInit {
 
   private async reload(): Promise<void> {
     this.listed = this.selectedRepositoryId;
+    // A filter over one repository's rows has nothing to say about another's.
+    this.onlyPlatformHost.set(false);
     if (!this.selectedRepositoryId) {
       this.workspaces.set([]);
       return;

@@ -255,8 +255,12 @@ describe('WorkspacesPage', () => {
   it('says a workspace with no runtime state is unknown rather than stopped', async () => {
     const component = await open({ workspaces: [workspace({ runtimeStatus: null })] });
 
-    expect(text(component)).toContain('runtime unknown');
-    expect(text(component)).not.toContain('stopped');
+    // Scoped to the row itself: this workspace is also a DIRECT regular row, so the platform-host
+    // banner now legitimately says "stopped" of it elsewhere on the page — the row's own runtime
+    // label is the one place that must not.
+    const row = (component.nativeElement as HTMLElement).querySelector('li');
+    expect(row?.textContent).toContain('runtime unknown');
+    expect(row?.textContent).not.toContain('stopped');
   });
 
   it('asks for no workspaces at all when the project holds no wrapper', async () => {
@@ -470,6 +474,122 @@ describe('WorkspacesPage', () => {
       const rows = (component.nativeElement as HTMLElement).querySelectorAll('li');
       expect(rows[0].querySelector('.runner-badge')?.textContent).toContain('on node-a');
       expect(rows[1].querySelector('.runner-badge')).toBeNull();
+    });
+  });
+
+  /**
+   * qits-777: a handful of regular rows are still DIRECT, "on the platform host", because ordinary
+   * workspaces belong on runners now. This list marks each one and totals them in a banner.
+   */
+  describe('the platform-host badge and banner', () => {
+    const rowsOf = (component: ComponentFixture<WorkspacesPage>): Element[] =>
+      Array.from((component.nativeElement as HTMLElement).querySelectorAll('li'));
+
+    const press = (component: ComponentFixture<WorkspacesPage>, label: string): void => {
+      const button = Array.from(
+        (component.nativeElement as HTMLElement).querySelectorAll('button'),
+      ).find((candidate) => candidate.textContent?.trim() === label) as HTMLButtonElement;
+      expect(button, `a button labelled "${label}"`).toBeTruthy();
+      button.click();
+      component.detectChanges();
+    };
+
+    it('marks a DIRECT regular row and spares admin and runner-placed rows', async () => {
+      const component = await open({
+        workspaces: [
+          workspace({ id: 1, branch: 'plain' }),
+          workspace({ id: 2, branch: 'admin-row', admin: true }),
+          workspace({
+            id: 3,
+            branch: 'on-runner',
+            placement: 'RUNNER',
+            runner: { id: 'r-1', name: 'node-a' },
+          }),
+        ],
+      });
+
+      const rows = rowsOf(component);
+      expect(rows[0].querySelector('.platform-host-badge')).not.toBeNull();
+      expect(rows[1].querySelector('.platform-host-badge')).toBeNull();
+      expect(rows[2].querySelector('.platform-host-badge')).toBeNull();
+    });
+
+    it('spares the editor row too, the same way it spares admin', async () => {
+      const component = await open({
+        workspaces: [workspace({ branch: 'editor-row', editor: true })],
+      });
+
+      expect(rowsOf(component)[0].querySelector('.platform-host-badge')).toBeNull();
+      expect(text(component)).not.toContain('still run on the platform host');
+    });
+
+    it('counts a running dirty or unpushed row apart from a stopped one, in the singular', async () => {
+      const component = await open({
+        workspaces: [
+          workspace({ id: 1, branch: 'dirty-running', runtimeStatus: 'RUNNING', clean: false }),
+          workspace({
+            id: 2,
+            branch: 'unpushed-running',
+            runtimeStatus: 'RUNNING',
+            clean: true,
+            pushed: false,
+          }),
+          workspace({ id: 3, branch: 'stopped-row', runtimeStatus: 'STOPPED' }),
+          workspace({
+            id: 4,
+            branch: 'ready-row',
+            runtimeStatus: 'RUNNING',
+            clean: true,
+            pushed: true,
+          }),
+        ],
+      });
+
+      expect(text(component)).toContain(
+        '4 workspaces still run on the platform host: 2 need a clean, pushed tree, 1 is stopped.',
+      );
+    });
+
+    it('says "1 workspace still runs" rather than the plural for exactly one row', async () => {
+      const component = await open({ workspaces: [workspace({ branch: 'solo' })] });
+
+      expect(text(component)).toContain('1 workspace still runs on the platform host');
+    });
+
+    it('shows no banner once every row has moved to a runner', async () => {
+      const component = await open({
+        workspaces: [
+          workspace({ placement: 'RUNNER', runner: { id: 'r-1', name: 'node-a' } }),
+        ],
+      });
+
+      expect(text(component)).not.toContain('still run on the platform host');
+    });
+
+    it("narrows the list to the banner's own rows through its filter link, and back again", async () => {
+      const component = await open({
+        workspaces: [
+          workspace({ id: 1, branch: 'plain' }),
+          workspace({
+            id: 2,
+            branch: 'on-runner',
+            placement: 'RUNNER',
+            runner: { id: 'r-1', name: 'node-a' },
+          }),
+        ],
+      });
+
+      expect(text(component)).toContain('plain');
+      expect(text(component)).toContain('on-runner');
+
+      press(component, 'Show them');
+      expect(rowsOf(component)).toHaveLength(1);
+      expect(text(component)).toContain('plain');
+      expect(text(component)).not.toContain('on-runner');
+
+      press(component, 'Show all');
+      expect(rowsOf(component)).toHaveLength(2);
+      expect(text(component)).toContain('on-runner');
     });
   });
 });

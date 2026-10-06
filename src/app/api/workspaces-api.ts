@@ -220,6 +220,29 @@ export class WorkspacesApi {
   }
 
   /**
+   * Move a DIRECT regular workspace onto a workspace runner, recreating it there from its branch —
+   * the remedy for a row still running "on the platform host" now that ordinary workspaces belong
+   * on runners.
+   *
+   * **Answers exactly what {@link WorkspacesApi.recreateContainer} answers**: the workspace as it
+   * now stands, plus the process doing the work. The service starts a stopped DIRECT row first, so
+   * that start — like a recreate's — is what the Starting tab attaches to.
+   *
+   * **Rejects with the `HttpErrorResponse`**, the same `{"message"}` envelope every refusal here
+   * uses: a 400 (`DIRTY`, `UNPUSHED`, `UNKNOWN`, `PROVISIONING`, `NOT_REGULAR`) or a 409
+   * (`ALREADY_MOVED`). The caller reads it with {@link ../ui/loadable#describeError}, exactly as a
+   * recreate's refusal is read — there is no second error shape to learn.
+   */
+  async moveToRunner(workspaceId: number | string): Promise<ContainerProcessResponse> {
+    return firstValueFrom(
+      this.http.post<ContainerProcessResponse>(
+        `${this.base}/workspaces/api/workspaces/${encodeURIComponent(workspaceId)}/move-to-runner`,
+        {},
+      ),
+    );
+  }
+
+  /**
    * Abandon the work: the workspace resolves, unmerged, with an optional markdown note saying why.
    *
    * The note is the whole record of what was tried, so it is worth asking for — after this call the

@@ -124,4 +124,35 @@ describe('WorkspacesApi', () => {
 
     await expect(integrate).rejects.toBeInstanceOf(HttpErrorResponse);
   });
+
+  /**
+   * qits-777's move door: posts to its own route and answers exactly what `recreate-container`
+   * does, because the Starting tab attaches to this call's process the same way it attaches to a
+   * recreate's.
+   */
+  it('posts to move-to-runner and reads back the workspace plus the process doing the work', async () => {
+    const moved = api.moveToRunner(7);
+    const request = http.expectOne('/workspaces/api/workspaces/7/move-to-runner');
+
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({});
+
+    request.flush({
+      workspace: { id: 7, workspaceId: 'adhoc-changes', status: 'ACTIVE', placement: 'RUNNER' },
+      technicalProcessId: 'proc-1',
+    });
+    await expect(moved).resolves.toMatchObject({
+      workspace: { id: 7, placement: 'RUNNER' },
+      technicalProcessId: 'proc-1',
+    });
+  });
+
+  it('rejects a refused move with the HttpErrorResponse, same as a refused recreate', async () => {
+    const moved = api.moveToRunner(7);
+    http
+      .expectOne('/workspaces/api/workspaces/7/move-to-runner')
+      .flush({ message: 'DIRTY' }, { status: 400, statusText: 'Bad Request' });
+
+    await expect(moved).rejects.toBeInstanceOf(HttpErrorResponse);
+  });
 });

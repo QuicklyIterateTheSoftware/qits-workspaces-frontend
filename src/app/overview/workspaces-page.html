@@ -76,13 +76,29 @@
 
   <section aria-labelledby="existing-title">
     <h2 id="existing-title">Existing workspaces</h2>
+    @if (platformHostBanner()) {
+      <p class="platform-host-banner" role="status">
+        {{ platformHostSentence() }}
+        @if (onlyPlatformHost()) {
+          <button type="button" class="link" (click)="onlyPlatformHost.set(false)">
+            Show all
+          </button>
+        } @else {
+          <button type="button" class="link" (click)="onlyPlatformHost.set(true)">
+            Show them
+          </button>
+        }
+      </p>
+    }
     @if (loading()) {
       <p class="muted">Loading…</p>
     } @else if (!workspaces().length) {
       <p class="muted">No active workspaces yet.</p>
+    } @else if (!visibleWorkspaces().length) {
+      <p class="muted">No workspaces match this filter.</p>
     } @else {
       <ul>
-        @for (workspace of workspaces(); track workspace.id) {
+        @for (workspace of visibleWorkspaces(); track workspace.id) {
           <li>
             <a
               [routerLink]="[
@@ -105,6 +121,14 @@
               @if (workspace.placement === 'RUNNER') {
                 <span class="runner-badge" title="Placed on a workspace runner's node">
                   {{ workspace.runner ? 'on ' + workspace.runner.name : 'runner' }}
+                </span>
+              }
+              @if (isDirectRegular(workspace)) {
+                <span
+                  class="platform-host-badge"
+                  title="Still runs on the platform host, not a workspace runner"
+                >
+                  platform host
                 </span>
               }
               <span>{{ workspace.runtimeStatus?.toLowerCase() ?? 'runtime unknown' }}</span>
