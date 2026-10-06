@@ -36,7 +36,7 @@
         <input name="branch" [(ngModel)]="branch" required maxlength="120" autocomplete="off" />
       </label>
       <label class="checkbox">
-        <input type="checkbox" name="admin" [(ngModel)]="admin" [disabled]="placeOnRunner" />
+        <input type="checkbox" name="admin" [(ngModel)]="admin" />
         <span>
           Enable docker socket
           <small>
@@ -45,23 +45,6 @@
           </small>
         </span>
       </label>
-      @if (viewerAdmin() && runnerEligible()) {
-        <label class="checkbox">
-          <input
-            type="checkbox"
-            name="placeOnRunner"
-            [(ngModel)]="placeOnRunner"
-            [disabled]="admin"
-          />
-          <span>
-            Place on a runner
-            <small>
-              Runs the container on a workspace runner's node instead of the platform host. Not with
-              the docker socket: an admin-mode container stays on the host.
-            </small>
-          </span>
-        </label>
-      }
       <button type="submit" [disabled]="creating() || !selectedRepositoryId || !branch.trim()">
         {{ creating() ? 'Creating…' : 'Create workspace' }}
       </button>

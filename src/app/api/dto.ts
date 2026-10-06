@@ -33,6 +33,11 @@ export type WorkspaceRuntimeStatus =
  * Where a workspace's container runs, decided at create and never changed: `DIRECT` on the platform
  * host through qits-containers, `RUNNER` on a workspace runner's own node.
  *
+ * **The service decides it unconditionally; the create request no longer chooses it.** Every
+ * regular workspace is placed on a runner, full stop — asking for `DIRECT` on one is refused with a
+ * 400. An admin workspace and the one shared editor are the opposite: always `DIRECT`, and asking
+ * for `RUNNER` on either is the same 400.
+ *
  * Two runtime states exist only for `RUNNER`. `QUEUED` is persisted — the workspace was asked to
  * start and waits for a slot on its runner (or, never placed yet, for any runner). `UNAVAILABLE` is
  * computed and never stored: the owning runner has been offline beyond its reconnect grace, and the
@@ -647,14 +652,6 @@ export interface CreateWorkspaceRequest {
    * once, at creation; no request afterwards can promote a workspace.
    */
   readonly admin?: boolean;
-
-  /**
-   * Where the container should run. Optional and **omitted means `DIRECT`**, which is what every
-   * caller but the overview's "Place on a runner" box sends. The service refuses `RUNNER` together
-   * with `admin` (400) — an admin workspace holds the host's docker socket and stays on the host —
-   * and answers 409 `NO_RUNNER` when no runner is eligible to take it.
-   */
-  readonly placement?: WorkspacePlacement;
 }
 
 /**
