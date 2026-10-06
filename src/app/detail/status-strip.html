@@ -3,9 +3,6 @@
     <span class="key">Container</span>
     <span class="value">
       <qits-badge [label]="runtimeLabel()" [tone]="runtimeTone()" />
-      @if (directRegular()) {
-        <qits-badge label="on the platform host" tone="warning" />
-      }
       @if (placementNote(); as note) {
         <span class="placement muted">{{ note }}</span>
       }
@@ -44,30 +41,14 @@
         (pressed)="recreate()"
         >Recreate</qits-button
       >
-      @if (directRegular()) {
-        <qits-button
-          variant="ghost"
-          size="sm"
-          [busy]="pending() === 'move'"
-          [disabled]="pending() !== null || moveDisabled()"
-          [attr.title]="moveBlocked()"
-          (pressed)="move()"
-          >Move to runner</qits-button
-        >
-      }
     </span>
     @if (unavailable(); as reason) {
       <p class="note unavailable" role="alert">
         Start, stop and recreate wait for the runner: {{ reason }}, and this workspace stays on it
         rather than moving elsewhere.
       </p>
-    } @else {
-      @if (recreateBlocked()) {
-        <p class="note">{{ recreateBlocked() }}</p>
-      }
-      @if (moveBlocked()) {
-        <p class="note">{{ moveBlocked() }}</p>
-      }
+    } @else if (recreateBlocked()) {
+      <p class="note">{{ recreateBlocked() }}</p>
     }
   </section>
 

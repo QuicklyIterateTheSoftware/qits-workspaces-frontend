@@ -15,10 +15,9 @@ import type { MergeResult } from '../merge/merge-outcome';
 import { MergePanel } from '../merge/merge-panel';
 import { driftLabel, relativeSince } from '../ui/format';
 import { describeError } from '../ui/loadable';
-import { isDirectRegular, isDirty, isMoveUnknown, isUnpushed } from '../ui/workspace-placement';
 
 /** Which button is waiting on the server. Never "some mutation is pending" — one Stop must not spin Start. */
-type Pending = 'start' | 'stop' | 'recreate' | 'move' | 'discard' | null;
+type Pending = 'start' | 'stop' | 'recreate' | 'discard' | null;
 
 /** What the page can say about the in-container daemon right now. */
 type DaemonState = 'connected' | 'gone' | 'not-running';
@@ -73,15 +72,6 @@ const RUNTIME_TONES: Readonly<Record<string, QitsBadgeTone>> = {
  * `UNAVAILABLE` is a runner offline beyond its grace. A workspace is sticky to its runner, so the
  * verbs cannot route anywhere else while it is gone: Start, Stop and Recreate are disabled with that
  * sentence rather than offered and answered with a 409.
- *
- * **A DIRECT regular row offers one more verb: Move to runner.** Regular workspaces run on workspace
- * runners now, and a handful of older rows are still DIRECT — "on the platform host", which this
- * strip says with a warning badge. The move recreates the row on a runner from its branch, and it
- * is guarded the way recreate is, by `clean` and by the new `pushed`: dirty or unpushed refuses with
- * a sentence and disables the button, `clean`/`pushed` unknown only hints — because the service
- * starts a stopped row before moving it, so "unknown" is not a reason to refuse the press. Admin and
- * editor rows, and every `RUNNER` row, render neither the badge nor the button: see {@link
- * ../ui/workspace-placement#isDirectRegular}.
  *
  * **Mutations refresh on settled, not on success.** A failed start still changed something worth
  * re-reading, and the truth after a refusal is more useful than the stale row that produced it.
@@ -226,48 +216,6 @@ export class StatusStrip {
       : 'Recreate needs a working tree the service can prove is clean. Nothing is reporting one here, so it is refused rather than risked.';
   });
 
-  /**
-   * Whether this row is still DIRECT and regular — the population the move-to-a-runner door and its
-   * badge are offered to at all. Admin, editor and RUNNER rows render neither.
-   */
-  protected readonly directRegular = computed(() => isDirectRegular(this.workspace()));
-
-  /**
-   * The move guard, as one sentence or null when there is nothing to explain.
-   *
-   * **Three of the four reasons disable the button** — dirty, unpushed and provisioning — **and the
-   * fourth does not.** `clean`/`pushed` unknown is drawn as a hint rather than a refusal: the door
-   * starts a stopped DIRECT row before it moves it, so "I cannot say yet" is not a reason to refuse
-   * the press, only a reason to explain what pressing it will do first. See {@link moveDisabled} for
-   * the enablement this sentence does not by itself decide.
-   */
-  protected readonly moveBlocked = computed<string | null>(() => {
-    const workspace = this.workspace();
-    if (isDirty(workspace)) {
-      return 'Move needs a clean working tree — commit or discard first.';
-    }
-    if (isUnpushed(workspace)) {
-      return "Move needs every commit pushed — this workspace's head is not on the git host yet.";
-    }
-    if (workspace.runtimeStatus === 'PROVISIONING') {
-      return 'Move needs the container to settle first — this one is still provisioning.';
-    }
-    if (isMoveUnknown(workspace)) {
-      return 'Move needs a running workspace that reports its tree. Press Move to start it here first, then it moves.';
-    }
-    return null;
-  });
-
-  /**
-   * Whether the move button itself is disabled. Not simply "`moveBlocked()` is non-null": the
-   * unknown case has words to show but the button stays pressable, because the door starts a
-   * stopped row before it moves it.
-   */
-  protected readonly moveDisabled = computed<boolean>(() => {
-    const workspace = this.workspace();
-    return isDirty(workspace) || isUnpushed(workspace) || workspace.runtimeStatus === 'PROVISIONING';
-  });
-
   protected async start(): Promise<void> {
     await this.run('start', async () => {
       const answer = await this.api.ensureContainer(this.workspace().id);
@@ -284,21 +232,6 @@ export class StatusStrip {
   protected async recreate(): Promise<void> {
     await this.run('recreate', async () => {
       const answer = await this.api.recreateContainer(this.workspace().id);
-      if (answer.technicalProcessId) {
-        this.started.emit(answer.technicalProcessId);
-      }
-    });
-  }
-
-  /**
-   * Move this DIRECT regular workspace onto a workspace runner. Same shape as {@link recreate}: the
-   * service answers the workspace and the process doing the work, and a process id opens the
-   * Starting tab exactly as a recreate's does. A 400 or 409 lands in {@link failure} through {@link
-   * run}, read by the same {@link describeError} a recreate's refusal is.
-   */
-  protected async move(): Promise<void> {
-    await this.run('move', async () => {
-      const answer = await this.api.moveToRunner(this.workspace().id);
       if (answer.technicalProcessId) {
         this.started.emit(answer.technicalProcessId);
       }

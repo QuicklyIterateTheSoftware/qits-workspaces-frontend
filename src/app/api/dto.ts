@@ -89,17 +89,6 @@ export interface WorkspaceDto {
   readonly runtimeError: string | null;
   readonly clean: boolean | null;
 
-  /**
-   * Whether the daemon's branch head is on the git host — pushed, not merely committed.
-   *
-   * **Only meaningful for a DIRECT regular row**: it is what the move-to-a-runner door guards,
-   * exactly as `clean` is what recreate guards. `null` is a disconnected daemon's "I cannot say",
-   * read the same way `clean: null` already is. **Optional**, for the reason `admin` is: a service
-   * that predates the move door answers nothing here, and `undefined` is treated as `null` — an
-   * older service's silence is unknown, not a claim that the head is pushed.
-   */
-  readonly pushed?: boolean | null;
-
   readonly agentActivity: AgentActivityState | null;
   readonly preamble: string | null;
 
@@ -148,7 +137,7 @@ export interface WorkspaceDto {
 
   /**
    * Whether this row **is** the platform editor — the one shared `/editor` container, which rides
-   * no particular piece of work and is never a candidate for the move-to-a-runner door.
+   * no particular piece of work.
    *
    * Decided at creation like `admin`, and **optional for the same reason**: a service that predates
    * the field answers nothing here, and absent means `false` rather than claiming the row is

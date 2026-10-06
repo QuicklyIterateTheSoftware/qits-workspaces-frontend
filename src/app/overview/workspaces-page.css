@@ -143,40 +143,6 @@ form > button {
   font-size: 0.72rem;
   letter-spacing: 0.02em;
 }
-/* A DIRECT regular row is never admin-mode or runner-placed, so this badge takes their place too. */
-.platform-host-badge {
-  align-self: center;
-  margin-left: auto;
-  margin-right: 0.75rem;
-  padding: 0.1rem 0.5rem;
-  border: 1px solid #7a3a1f;
-  border-radius: 0.35rem;
-  color: #e2a169;
-  font-size: 0.72rem;
-  letter-spacing: 0.02em;
-}
-.platform-host-banner {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin: 0 0 1rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid #7a3a1f;
-  border-radius: 0.5rem;
-  background: #1a130d;
-  color: #e2a169;
-  font-size: 0.85rem;
-}
-.platform-host-banner .link {
-  min-height: 0;
-  border: none;
-  padding: 0;
-  color: #8ec5f0;
-  background: none;
-  font: inherit;
-  text-decoration: underline;
-  cursor: pointer;
-}
 .hint {
   margin: 0.9rem 0 0;
   font-size: 0.8rem;
