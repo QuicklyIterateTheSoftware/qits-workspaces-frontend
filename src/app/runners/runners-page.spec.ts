@@ -15,6 +15,8 @@ const runner = (over: Partial<WorkspaceRunnerDto> = {}): WorkspaceRunnerDto => (
   name: 'node-a',
   description: null,
   slots: 2,
+  workspaceMemoryLimit: null,
+  workspaceMemorySwapLimit: null,
   version: '2026.1003.1',
   arch: 'amd64',
   dotClaudeVolume: 'qits-workspaces-runner-dot-claude-r1',
@@ -216,6 +218,271 @@ describe('RunnersPage', () => {
       // The list the create re-read carries the runner and nothing of its token.
       expect(text(fixture)).toContain('node-b');
       expect(text(fixture)).not.toContain('tok-123');
+    });
+
+    // --- workspace memory and memory+swap limits (qits-951) ---
+
+    it('shows a runner’s workspace memory and swap, and "platform default" when none is set', async () => {
+      const fixture = await open([
+        runner({
+          id: 'r-1',
+          name: 'node-a',
+          workspaceMemoryLimit: '8g',
+          workspaceMemorySwapLimit: '10g',
+        }),
+        runner({ id: 'r-2', name: 'node-b', workspaceMemoryLimit: null, workspaceMemorySwapLimit: null }),
+      ]);
+
+      const row = (name: string) => element(fixture).querySelector(`[data-runner="${name}"]`)!;
+      expect(row('node-a').querySelector('.workspace-memory')?.textContent).toBe('8g memory');
+      expect(row('node-a').querySelector('.workspace-memory-swap')?.textContent).toBe('10g swap');
+      expect(row('node-b').querySelector('.workspace-memory')?.textContent).toBe(
+        'platform default memory',
+      );
+      expect(row('node-b').querySelector('.workspace-memory-swap')).toBeNull();
+    });
+
+    it('sends a typed workspace memory and swap limit on create, trimmed', async () => {
+      const fixture = await open([]);
+
+      type(fixture, 'name', 'node-big');
+      type(fixture, 'workspace-memory', ' 8g ');
+      type(fixture, 'workspace-memory-swap', ' 10g ');
+      element(fixture)
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await settle(fixture);
+
+      const create = http.expectOne(
+        (request) => request.method === 'POST' && request.url === RUNNERS_URL,
+      );
+      expect(create.request.body).toEqual({
+        name: 'node-big',
+        description: null,
+        slots: 1,
+        workspaceMemoryLimit: '8g',
+        workspaceMemorySwapLimit: '10g',
+      });
+      const registration: RunnerRegistrationDto = {
+        runner: runner({
+          id: 'r-big',
+          name: 'node-big',
+          workspaceMemoryLimit: '8g',
+          workspaceMemorySwapLimit: '10g',
+        }),
+        registrationToken: 'tok-big',
+        installLine: 'curl -fsSL https://workspaces.example/install.sh | sh -s tok-big',
+      };
+      create.flush(registration, { status: 201, statusText: 'Created' });
+      await settle(fixture);
+      http
+        .expectOne((request) => request.method === 'GET' && request.url === RUNNERS_URL)
+        .flush([registration.runner]);
+      await settle(fixture);
+    });
+
+    it('accepts -1 as unlimited swap on create, alongside a memory limit', async () => {
+      const fixture = await open([]);
+
+      type(fixture, 'name', 'node-unlimited');
+      type(fixture, 'workspace-memory', '8g');
+      type(fixture, 'workspace-memory-swap', '-1');
+      element(fixture)
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await settle(fixture);
+
+      const create = http.expectOne(
+        (request) => request.method === 'POST' && request.url === RUNNERS_URL,
+      );
+      expect(create.request.body).toEqual({
+        name: 'node-unlimited',
+        description: null,
+        slots: 1,
+        workspaceMemoryLimit: '8g',
+        workspaceMemorySwapLimit: '-1',
+      });
+      const registration: RunnerRegistrationDto = {
+        runner: runner({
+          id: 'r-u',
+          name: 'node-unlimited',
+          workspaceMemoryLimit: '8g',
+          workspaceMemorySwapLimit: '-1',
+        }),
+        registrationToken: 'tok-u',
+        installLine: 'curl -fsSL https://workspaces.example/install.sh | sh -s tok-u',
+      };
+      create.flush(registration, { status: 201, statusText: 'Created' });
+      await settle(fixture);
+      http
+        .expectOne((request) => request.method === 'GET' && request.url === RUNNERS_URL)
+        .flush([registration.runner]);
+      await settle(fixture);
+    });
+
+    it('refuses a workspace memory limit that is not a docker size on create, and sends nothing', async () => {
+      const fixture = await open([]);
+
+      type(fixture, 'name', 'node-typo');
+      type(fixture, 'workspace-memory', '8 GB');
+      element(fixture)
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await settle(fixture);
+
+      expect(text(fixture)).toContain('A docker size: digits and an optional unit b, k, m or g');
+      // No POST was ever sent — http.verify() in afterEach would fail if one had been.
+    });
+
+    it('refuses a workspace swap limit without a memory limit on create', async () => {
+      const fixture = await open([]);
+
+      type(fixture, 'name', 'node-swap-only');
+      type(fixture, 'workspace-memory-swap', '8g');
+      element(fixture)
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await settle(fixture);
+
+      expect(text(fixture)).toContain('Needs a workspace memory limit too');
+      // No POST was ever sent — http.verify() in afterEach would fail if one had been.
+    });
+
+    it('refuses a workspace swap limit below the memory limit on create', async () => {
+      const fixture = await open([]);
+
+      type(fixture, 'name', 'node-swap-low');
+      type(fixture, 'workspace-memory', '8g');
+      type(fixture, 'workspace-memory-swap', '4g');
+      element(fixture)
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await settle(fixture);
+
+      expect(text(fixture)).toContain('Must be at least the workspace memory limit');
+      // No POST was ever sent — http.verify() in afterEach would fail if one had been.
+    });
+
+    it('changes an existing runner’s workspace memory and swap limits, sending only what moved', async () => {
+      const fixture = await open([
+        runner({ workspaceMemoryLimit: null, workspaceMemorySwapLimit: null }),
+      ]);
+
+      button(fixture, 'Actions').click();
+      await settle(fixture);
+      button(fixture, 'Edit slots/description').click();
+      await settle(fixture);
+      type(fixture, 'edit-workspace-memory', '8g');
+      type(fixture, 'edit-workspace-memory-swap', '10g');
+      button(fixture, 'Save').click();
+      await settle(fixture);
+
+      const request = http.expectOne(`${RUNNERS_URL}/r-1`);
+      expect(request.request.method).toBe('PATCH');
+      expect(request.request.body).toEqual({
+        slots: 2,
+        description: null,
+        workspaceMemoryLimit: '8g',
+        workspaceMemorySwapLimit: '10g',
+      });
+      request.flush(runner({ workspaceMemoryLimit: '8g', workspaceMemorySwapLimit: '10g' }));
+      await settle(fixture);
+      // `act()`'s own finally re-polls the list regardless of outcome.
+      http
+        .expectOne((req) => req.method === 'GET' && req.url === RUNNERS_URL)
+        .flush([runner({ workspaceMemoryLimit: '8g', workspaceMemorySwapLimit: '10g' })]);
+      await settle(fixture);
+      expect(text(fixture)).toContain('8g memory');
+      expect(text(fixture)).toContain('10g swap');
+    });
+
+    it('clears workspace memory and swap limits back to the platform default with empty strings', async () => {
+      const fixture = await open([
+        runner({ workspaceMemoryLimit: '8g', workspaceMemorySwapLimit: '10g' }),
+      ]);
+
+      button(fixture, 'Actions').click();
+      await settle(fixture);
+      button(fixture, 'Edit slots/description').click();
+      await settle(fixture);
+      const memoryInput = element(fixture).querySelector(
+        'input[name="edit-workspace-memory"]',
+      ) as HTMLInputElement;
+      const swapInput = element(fixture).querySelector(
+        'input[name="edit-workspace-memory-swap"]',
+      ) as HTMLInputElement;
+      expect(memoryInput.value).toBe('8g');
+      expect(swapInput.value).toBe('10g');
+      type(fixture, 'edit-workspace-memory', '');
+      type(fixture, 'edit-workspace-memory-swap', '');
+      button(fixture, 'Save').click();
+      await settle(fixture);
+
+      const request = http.expectOne(`${RUNNERS_URL}/r-1`);
+      expect(request.request.body).toEqual({
+        slots: 2,
+        description: null,
+        workspaceMemoryLimit: '',
+        workspaceMemorySwapLimit: '',
+      });
+      request.flush(runner({ workspaceMemoryLimit: null, workspaceMemorySwapLimit: null }));
+      await settle(fixture);
+      http
+        .expectOne((req) => req.method === 'GET' && req.url === RUNNERS_URL)
+        .flush([runner({ workspaceMemoryLimit: null, workspaceMemorySwapLimit: null })]);
+      await settle(fixture);
+    });
+
+    it('omits workspace memory and swap from a save when neither changed', async () => {
+      const fixture = await open([
+        runner({ workspaceMemoryLimit: '8g', workspaceMemorySwapLimit: '10g' }),
+      ]);
+
+      button(fixture, 'Actions').click();
+      await settle(fixture);
+      button(fixture, 'Edit slots/description').click();
+      await settle(fixture);
+      button(fixture, 'Save').click();
+      await settle(fixture);
+
+      const request = http.expectOne(`${RUNNERS_URL}/r-1`);
+      expect(request.request.body).toEqual({ slots: 2, description: null });
+      request.flush(runner({ workspaceMemoryLimit: '8g', workspaceMemorySwapLimit: '10g' }));
+      await settle(fixture);
+      http
+        .expectOne((req) => req.method === 'GET' && req.url === RUNNERS_URL)
+        .flush([runner({ workspaceMemoryLimit: '8g', workspaceMemorySwapLimit: '10g' })]);
+      await settle(fixture);
+    });
+
+    it('refuses a malformed workspace memory limit on edit, says why, and sends nothing', async () => {
+      const fixture = await open([runner()]);
+
+      button(fixture, 'Actions').click();
+      await settle(fixture);
+      button(fixture, 'Edit slots/description').click();
+      await settle(fixture);
+      type(fixture, 'edit-workspace-memory', 'lots');
+      button(fixture, 'Save').click();
+      await settle(fixture);
+
+      expect(text(fixture)).toContain('A docker size: digits and an optional unit b, k, m or g');
+      // No PATCH was ever sent — http.verify() in afterEach would fail if one had been.
+    });
+
+    it('refuses a workspace swap limit below the memory limit on edit, says why, and sends nothing', async () => {
+      const fixture = await open([runner({ workspaceMemoryLimit: '8g', workspaceMemorySwapLimit: null })]);
+
+      button(fixture, 'Actions').click();
+      await settle(fixture);
+      button(fixture, 'Edit slots/description').click();
+      await settle(fixture);
+      type(fixture, 'edit-workspace-memory-swap', '4g');
+      button(fixture, 'Save').click();
+      await settle(fixture);
+
+      expect(text(fixture)).toContain('Must be at least the workspace memory limit');
+      // No PATCH was ever sent — http.verify() in afterEach would fail if one had been.
     });
 
     it('lists the workspaces a refused delete names, linking the ones it can find', async () => {

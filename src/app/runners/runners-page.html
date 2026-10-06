@@ -75,6 +75,38 @@
           <span class="field-error" role="alert">{{ slotsProblem() }}</span>
         }
       </label>
+      <label class="field field-narrow">
+        <span>Workspace memory</span>
+        <input
+          type="text"
+          name="workspace-memory"
+          class="workspace-memory"
+          [value]="newWorkspaceMemoryLimit()"
+          (input)="newWorkspaceMemoryLimit.set($any($event.target).value)"
+          placeholder="8g"
+        />
+        <span class="field-hint">Blank: platform default.</span>
+        @if (workspaceMemoryLimitProblem()) {
+          <span class="field-error" role="alert">{{ workspaceMemoryLimitProblem() }}</span>
+        }
+      </label>
+      <label class="field field-narrow">
+        <span>Workspace memory + swap</span>
+        <input
+          type="text"
+          name="workspace-memory-swap"
+          class="workspace-memory-swap"
+          [value]="newWorkspaceMemorySwapLimit()"
+          (input)="newWorkspaceMemorySwapLimit.set($any($event.target).value)"
+          placeholder="8g"
+        />
+        <span class="field-hint">
+          Total incl. memory; blank: no swap beyond the memory cap; -1: unlimited swap.
+        </span>
+        @if (workspaceMemorySwapLimitProblem()) {
+          <span class="field-error" role="alert">{{ workspaceMemorySwapLimitProblem() }}</span>
+        }
+      </label>
       <qits-button variant="primary" size="sm" type="submit" [busy]="creating()">
         Register
       </qits-button>
@@ -131,6 +163,10 @@
               <span class="fact slots">{{ runner.running }}/{{ runner.slots }} slots running</span>
               <span class="fact owned">{{ runner.owned }} owned</span>
               <span class="fact queued">{{ runner.queued }} queued</span>
+              <span class="fact workspace-memory">{{ workspaceMemoryDisplay(runner) }}</span>
+              @if (workspaceMemorySwapDisplay(runner); as swap) {
+                <span class="fact workspace-memory-swap">{{ swap }}</span>
+              }
               @if (runner.quarantined) {
                 <qits-badge class="quarantined" label="quarantined" tone="warning" />
                 <span class="fact quarantine-reason">
@@ -404,6 +440,38 @@
                         [value]="draft.description"
                         (input)="setEditDescription($any($event.target).value)"
                       />
+                    </label>
+                    <label class="field field-narrow">
+                      <span>Workspace memory</span>
+                      <input
+                        type="text"
+                        name="edit-workspace-memory"
+                        class="workspace-memory"
+                        [value]="draft.workspaceMemoryLimit"
+                        (input)="setEditWorkspaceMemoryLimit($any($event.target).value)"
+                        placeholder="8g"
+                      />
+                      <span class="field-hint">Blank: platform default.</span>
+                      @if (editWorkspaceMemoryLimitProblem()) {
+                        <span class="field-error" role="alert">{{ editWorkspaceMemoryLimitProblem() }}</span>
+                      }
+                    </label>
+                    <label class="field field-narrow">
+                      <span>Workspace memory + swap</span>
+                      <input
+                        type="text"
+                        name="edit-workspace-memory-swap"
+                        class="workspace-memory-swap"
+                        [value]="draft.workspaceMemorySwapLimit"
+                        (input)="setEditWorkspaceMemorySwapLimit($any($event.target).value)"
+                        placeholder="8g"
+                      />
+                      <span class="field-hint">
+                        Total incl. memory; blank: no swap beyond the memory cap; -1: unlimited swap.
+                      </span>
+                      @if (editWorkspaceMemorySwapLimitProblem()) {
+                        <span class="field-error" role="alert">{{ editWorkspaceMemorySwapLimitProblem() }}</span>
+                      }
                     </label>
                     <div class="menu-actions">
                       <qits-button

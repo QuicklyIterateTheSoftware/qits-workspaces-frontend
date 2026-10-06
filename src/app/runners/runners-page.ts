@@ -65,6 +65,74 @@ const NODE_INVENTORY_CHECK = 'nodeInventory';
 /** The sentence for a quarantined runner the service gave no reason for — a new one. */
 const AWAITING_FIRST_HEALTHCHECK = 'awaiting its first health check';
 
+/**
+ * A workspace memory or memory+swap limit's own docker-size grammar — digits and an optional
+ * `b`/`k`/`m`/`g` — mirrored from qits-ci-frontend's `STEP_MEMORY_LIMIT_PATTERN` for the same
+ * reason: the service additionally refuses anything under docker's 6 MiB floor, and renders that
+ * refusal itself when it does.
+ */
+const DOCKER_SIZE_PATTERN = /^[0-9]{1,15}[bkmgBKMG]?$/;
+
+/** The one swap value with no docker-size shape of its own: unlimited swap. */
+const UNLIMITED_SWAP = '-1';
+
+/** Why a typed workspace memory limit is refused before the round trip, or `''` when it is not. */
+function workspaceMemoryLimitProblemOf(value: string): string {
+  const limit = value.trim();
+  return limit === '' || DOCKER_SIZE_PATTERN.test(limit)
+    ? ''
+    : 'A docker size: digits and an optional unit b, k, m or g — e.g. 8g or 8192m.';
+}
+
+/** A docker size's bytes, so a swap limit can be checked against the memory limit it must cover. */
+function bytesOf(size: string): number {
+  const match = /^([0-9]{1,15})([bkmgBKMG]?)$/.exec(size);
+  if (!match) {
+    return NaN;
+  }
+  const [, digits, unit] = match;
+  const multiplier =
+    { '': 1, b: 1, k: 1024, m: 1024 ** 2, g: 1024 ** 3 }[unit.toLowerCase()] ?? NaN;
+  return Number(digits) * multiplier;
+}
+
+/**
+ * Why a typed workspace memory+swap limit is refused, or `''` when it is not: not a docker size
+ * and not `-1`; set with no memory limit of its own, since swap is the total of both and the
+ * service refuses one without the other; or set below the memory limit it has to cover.
+ */
+function workspaceMemorySwapLimitProblemOf(memory: string, swap: string): string {
+  const limit = swap.trim();
+  if (limit === '') {
+    return '';
+  }
+  if (limit !== UNLIMITED_SWAP && !DOCKER_SIZE_PATTERN.test(limit)) {
+    return 'A docker size, or -1 for unlimited swap — e.g. 8g, 8192m or -1.';
+  }
+  const memoryLimit = memory.trim();
+  if (memoryLimit === '') {
+    return 'Needs a workspace memory limit too — this is the total of both.';
+  }
+  if (limit === UNLIMITED_SWAP || !DOCKER_SIZE_PATTERN.test(memoryLimit)) {
+    return '';
+  }
+  return bytesOf(limit) >= bytesOf(memoryLimit)
+    ? ''
+    : 'Must be at least the workspace memory limit — this is the total of both.';
+}
+
+/** What the row says about a runner's workspace memory cap: its own, or the platform's. */
+function workspaceMemoryDisplayOf(runner: WorkspaceRunnerDto): string {
+  return runner.workspaceMemoryLimit
+    ? `${runner.workspaceMemoryLimit} memory`
+    : 'platform default memory';
+}
+
+/** What the row adds for swap, once the runner has one set — `null` draws nothing. */
+function workspaceMemorySwapDisplayOf(runner: WorkspaceRunnerDto): string | null {
+  return runner.workspaceMemorySwapLimit ? `${runner.workspaceMemorySwapLimit} swap` : null;
+}
+
 /** A badge: what it says and how loud. */
 interface Badge {
   readonly label: string;
@@ -165,6 +233,10 @@ export interface OwningWorkspace {
 interface EditDraft {
   readonly slots: number;
   readonly description: string;
+  /** As typed; blank is the platform default. */
+  readonly workspaceMemoryLimit: string;
+  /** As typed; blank is no swap beyond the memory cap, `-1` is unlimited swap. */
+  readonly workspaceMemorySwapLimit: string;
 }
 
 /** One check, drawn as a badge plus its detail sentence. */
@@ -273,6 +345,8 @@ export class RunnersPage {
   protected readonly minSlots = MIN_SLOTS;
   protected readonly connectivity = connectivityOf;
   protected readonly presence = presenceOf;
+  protected readonly workspaceMemoryDisplay = workspaceMemoryDisplayOf;
+  protected readonly workspaceMemorySwapDisplay = workspaceMemorySwapDisplayOf;
 
   /** Where this page's own links start — bare, or under the scope the reader came in through. */
   protected readonly home = computed<string[]>(() => [...scopeCommands(this.qitsScope.scope())]);
@@ -287,6 +361,8 @@ export class RunnersPage {
   protected readonly newName = signal('');
   protected readonly newDescription = signal('');
   protected readonly newSlots = signal(1);
+  protected readonly newWorkspaceMemoryLimit = signal('');
+  protected readonly newWorkspaceMemorySwapLimit = signal('');
   protected readonly creating = signal(false);
   protected readonly createError = signal('');
   private readonly submitted = signal(false);
@@ -312,6 +388,19 @@ export class RunnersPage {
     return Number.isInteger(slots) && slots >= MIN_SLOTS ? '' : 'Slots must be 0 or more.';
   });
 
+  protected readonly workspaceMemoryLimitProblem = computed(() =>
+    this.submitted() ? workspaceMemoryLimitProblemOf(this.newWorkspaceMemoryLimit()) : '',
+  );
+
+  protected readonly workspaceMemorySwapLimitProblem = computed(() =>
+    this.submitted()
+      ? workspaceMemorySwapLimitProblemOf(
+          this.newWorkspaceMemoryLimit(),
+          this.newWorkspaceMemorySwapLimit(),
+        )
+      : '',
+  );
+
   // --- the once-only install panel, shared by create and rotate ---
 
   protected readonly panel = signal<InstallPanel | null>(null);
@@ -325,6 +414,21 @@ export class RunnersPage {
   protected readonly busy = signal<string | null>(null);
   protected readonly rowError = signal('');
   protected readonly confirmingDelete = signal(false);
+
+  /** Touched only once a save was attempted, so the memory fields are not flagged before anyone types. */
+  private readonly editSubmitted = signal(false);
+
+  protected readonly editWorkspaceMemoryLimitProblem = computed(() => {
+    const draft = this.editing();
+    return draft && this.editSubmitted() ? workspaceMemoryLimitProblemOf(draft.workspaceMemoryLimit) : '';
+  });
+
+  protected readonly editWorkspaceMemorySwapLimitProblem = computed(() => {
+    const draft = this.editing();
+    return draft && this.editSubmitted()
+      ? workspaceMemorySwapLimitProblemOf(draft.workspaceMemoryLimit, draft.workspaceMemorySwapLimit)
+      : '';
+  });
 
   /** The workspaces a refused delete named, resolved to links where a wrapper's list holds them. */
   protected readonly owners = signal<readonly OwningWorkspace[] | null>(null);
@@ -506,21 +610,33 @@ export class RunnersPage {
 
   protected async createRunner(): Promise<void> {
     this.submitted.set(true);
-    if (this.nameProblem() || this.slotsProblem()) {
+    if (
+      this.nameProblem() ||
+      this.slotsProblem() ||
+      this.workspaceMemoryLimitProblem() ||
+      this.workspaceMemorySwapLimitProblem()
+    ) {
       return;
     }
     this.creating.set(true);
     this.createError.set('');
+    // Sent only when typed: absent is the platform default on both.
+    const workspaceMemoryLimit = this.newWorkspaceMemoryLimit().trim();
+    const workspaceMemorySwapLimit = this.newWorkspaceMemorySwapLimit().trim();
     try {
       const created = await this.api.createRunner({
         name: this.newName(),
         description: this.newDescription() || null,
         slots: this.newSlots(),
+        ...(workspaceMemoryLimit ? { workspaceMemoryLimit } : {}),
+        ...(workspaceMemorySwapLimit ? { workspaceMemorySwapLimit } : {}),
       });
       this.openPanel(created);
       this.newName.set('');
       this.newDescription.set('');
       this.newSlots.set(1);
+      this.newWorkspaceMemoryLimit.set('');
+      this.newWorkspaceMemorySwapLimit.set('');
       this.submitted.set(false);
       await this.load();
     } catch (error) {
@@ -576,13 +692,20 @@ export class RunnersPage {
   }
 
   protected startEdit(runner: WorkspaceRunnerDto): void {
-    this.editing.set({ slots: runner.slots, description: runner.description ?? '' });
+    this.editing.set({
+      slots: runner.slots,
+      description: runner.description ?? '',
+      workspaceMemoryLimit: runner.workspaceMemoryLimit ?? '',
+      workspaceMemorySwapLimit: runner.workspaceMemorySwapLimit ?? '',
+    });
     this.rowError.set('');
+    this.editSubmitted.set(false);
   }
 
   protected cancelEdit(): void {
     this.editing.set(null);
     this.rowError.set('');
+    this.editSubmitted.set(false);
   }
 
   protected setEditSlots(slots: number): void {
@@ -593,7 +716,16 @@ export class RunnersPage {
     this.editing.update((draft) => (draft ? { ...draft, description } : draft));
   }
 
+  protected setEditWorkspaceMemoryLimit(workspaceMemoryLimit: string): void {
+    this.editing.update((draft) => (draft ? { ...draft, workspaceMemoryLimit } : draft));
+  }
+
+  protected setEditWorkspaceMemorySwapLimit(workspaceMemorySwapLimit: string): void {
+    this.editing.update((draft) => (draft ? { ...draft, workspaceMemorySwapLimit } : draft));
+  }
+
   protected async saveEdit(runner: WorkspaceRunnerDto): Promise<void> {
+    this.editSubmitted.set(true);
     const draft = this.editing();
     if (!draft) {
       return;
@@ -602,10 +734,23 @@ export class RunnersPage {
       this.rowError.set('Slots must be 0 or more.');
       return;
     }
+    if (
+      workspaceMemoryLimitProblemOf(draft.workspaceMemoryLimit) ||
+      workspaceMemorySwapLimitProblemOf(draft.workspaceMemoryLimit, draft.workspaceMemorySwapLimit)
+    ) {
+      return;
+    }
+    // Sent only when it moved — an empty string is the clear, back to the platform default.
+    const workspaceMemoryLimit = draft.workspaceMemoryLimit.trim();
+    const memoryChanged = workspaceMemoryLimit !== (runner.workspaceMemoryLimit ?? '');
+    const workspaceMemorySwapLimit = draft.workspaceMemorySwapLimit.trim();
+    const swapChanged = workspaceMemorySwapLimit !== (runner.workspaceMemorySwapLimit ?? '');
     await this.act('save', 'Could not save', async () => {
       await this.api.patchRunner(runner.id, {
         slots: draft.slots,
         description: draft.description || null,
+        ...(memoryChanged ? { workspaceMemoryLimit } : {}),
+        ...(swapChanged ? { workspaceMemorySwapLimit } : {}),
       });
       this.editing.set(null);
     });

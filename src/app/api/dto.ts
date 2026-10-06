@@ -689,12 +689,20 @@ export interface WorkspaceRunnerLoginDto {
  * `loginCommandPending` is true when that volume is known but the commands are still withheld
  * because the runner has not yet got the workspace image onto its node; optional, absent means
  * false, so the SPA keeps working against a server that predates the field.
+ *
+ * `workspaceMemoryLimit` is the memory cap a workspace container on this runner gets — a docker
+ * size such as `8g` or `8192m` — mirrored from qits-ci-frontend's `stepMemoryLimit`. `null` means
+ * the platform default. `workspaceMemorySwapLimit` is the TOTAL memory+swap ceiling, docker's own
+ * `--memory-swap`: `null` means no swap beyond whatever the memory cap is, and the literal `-1`
+ * means unlimited swap.
  */
 export interface WorkspaceRunnerDto {
   readonly id: string;
   readonly name: string;
   readonly description: string | null;
   readonly slots: number;
+  readonly workspaceMemoryLimit: string | null;
+  readonly workspaceMemorySwapLimit: string | null;
   readonly version: string | null;
   readonly arch: string | null;
   readonly dotClaudeVolume: string | null;
@@ -804,17 +812,29 @@ export interface WorkspaceRunnerHealthDetailDto {
   readonly checks: readonly WorkspaceRunnerHealthCheckDetailDto[];
 }
 
-/** What a runner create takes. Slots are the containers it may run at once. */
+/**
+ * What a runner create takes. Slots are the containers it may run at once. `workspaceMemoryLimit`
+ * and `workspaceMemorySwapLimit` are sent only when typed, trimmed; absent is the platform default
+ * on both — see {@link WorkspaceRunnerDto}.
+ */
 export interface CreateRunnerRequest {
   readonly name: string;
   readonly description?: string | null;
   readonly slots: number;
+  readonly workspaceMemoryLimit?: string;
+  readonly workspaceMemorySwapLimit?: string;
 }
 
-/** What a runner PATCH takes: only the fields that are sent change. */
+/**
+ * What a runner PATCH takes: only the fields that are sent change. `workspaceMemoryLimit` and
+ * `workspaceMemorySwapLimit` as an empty string each clear the one they name back to the platform
+ * default; absent leaves it as it was.
+ */
 export interface PatchRunnerRequest {
   readonly slots?: number;
   readonly description?: string | null;
+  readonly workspaceMemoryLimit?: string;
+  readonly workspaceMemorySwapLimit?: string;
 }
 
 /**
