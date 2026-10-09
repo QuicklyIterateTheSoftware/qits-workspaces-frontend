@@ -77,6 +77,13 @@ export class ActionsPanel {
   /** Read to name the container-stopped state before a request fails rather than after. */
   readonly runtimeStatus = input<WorkspaceRuntimeStatus | null>(null);
 
+  /**
+   * Whether the row's own `daemonConnectedAt` is set — the session-is-up fact, read only for
+   * `UNAVAILABLE`. A runner-placed workspace whose runner has dropped offline still runs its
+   * control socket through the edge, so a connected daemon there is not a gone container.
+   */
+  readonly daemonConnected = input(false);
+
   protected readonly actions = signal<Loadable<readonly ActionDto[]>>(IDLE);
 
   /** Rows with a run or a terminate in flight, keyed so one press spins one row. */
@@ -128,10 +135,18 @@ export class ActionsPanel {
    * Either the workspace row already says so, or the proxy answered that nothing is listening. Both
    * are the same sentence to a reader, and the row is checked first because it is knowable without a
    * failed request.
+   *
+   * **`UNAVAILABLE` with a connected daemon is the one exception.** The runner being offline does
+   * not take the control socket down with it — that rides the edge — so a row reporting
+   * `daemonConnectedAt` is not gone even though its runtime status says otherwise. The
+   * proxy-unreachable fallback below still applies on top of that: a stale "connected" row whose
+   * proxy has just started failing is caught the same way it always was.
    */
   protected readonly containerGone = computed(() => {
     const runtime = this.runtimeStatus();
-    if (runtime !== null && runtime !== 'RUNNING') {
+    const sessionLive =
+      runtime === 'RUNNING' || (runtime === 'UNAVAILABLE' && this.daemonConnected());
+    if (runtime !== null && !sessionLive) {
       return true;
     }
     const state = this.actions();

@@ -33,6 +33,7 @@ const ACTIONS: readonly ActionDto[] = [
   template: `<app-actions-panel
     [workspaceRowId]="id()"
     [runtimeStatus]="runtime()"
+    [daemonConnected]="daemonConnected()"
     [visible]="visible()"
   />`,
 })
@@ -40,6 +41,7 @@ class PanelHost {
   readonly id = signal(7);
   readonly visible = signal(true);
   readonly runtime = signal<WorkspaceRuntimeStatus | null>('RUNNING');
+  readonly daemonConnected = signal(false);
 }
 
 /**
@@ -254,6 +256,46 @@ describe('ActionsPanel', () => {
     );
     expect(badges).toEqual(['chat']);
     expect(historyNames()).toEqual(['claude', 'build']);
+  });
+
+  /**
+   * A runner-placed row can report `UNAVAILABLE` while its daemon is still reachable through the
+   * edge — the runner being offline says nothing about the control socket, which does not route
+   * through it. `containerGone` must not treat that row as gone, or the whole tab would refuse to
+   * load a session that is, in fact, live.
+   */
+  it('treats UNAVAILABLE with a connected daemon as live, not gone', async () => {
+    fixture = TestBed.createComponent(PanelHost);
+    host = fixture.componentInstance;
+    host.runtime.set('UNAVAILABLE');
+    host.daemonConnected.set(true);
+    await settle();
+    answer(ACTIONS, [command()]);
+    await settle();
+
+    expect(text()).not.toContain('The container is stopped');
+    expect(actionNames()).toEqual(['Build', 'Shell']);
+  });
+
+  it('keeps UNAVAILABLE without a connected daemon reading as gone, unchanged', async () => {
+    fixture = TestBed.createComponent(PanelHost);
+    host = fixture.componentInstance;
+    host.runtime.set('UNAVAILABLE');
+    await settle();
+
+    http
+      .expectOne('/workspaces/container/7/commands/actions')
+      .flush({ message: 'No workspace here.' }, { status: 502, statusText: 'Bad Gateway' });
+    http
+      .expectOne('/workspaces/container/7/commands')
+      .flush({ message: 'No workspace here.' }, { status: 502, statusText: 'Bad Gateway' });
+    http
+      .expectOne('/workspaces/container/7/bootstrap-commands')
+      .flush({ message: 'No workspace here.' }, { status: 502, statusText: 'Bad Gateway' });
+    http.expectOne('/workspaces/api/workspaces/7/bootstrap-runs').flush({ runs: [] });
+    await settle();
+
+    expect(text()).toContain('The container is stopped');
   });
 
   it('does not read while hidden, and catches up on becoming visible', async () => {

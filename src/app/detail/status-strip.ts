@@ -73,6 +73,13 @@ const RUNTIME_TONES: Readonly<Record<string, QitsBadgeTone>> = {
  * verbs cannot route anywhere else while it is gone: Start, Stop and Recreate are disabled with that
  * sentence rather than offered and answered with a 409.
  *
+ * **`UNAVAILABLE` does not mean the session is dead.** The in-container daemon reaches the platform
+ * through the edge, not through the runner, so a workspace whose runner has dropped offline can
+ * still carry a live `daemonConnectedAt` — and with it `daemonVersion`, `clean` and `agentActivity` —
+ * while the lifecycle verbs stay refused. Such a row reads its daemon state exactly as a `RUNNING`
+ * one does: connected, or gone if the proxy says so. Only an `UNAVAILABLE` row with no
+ * `daemonConnectedAt` has nothing live left to show.
+ *
  * **Mutations refresh on settled, not on success.** A failed start still changed something worth
  * re-reading, and the truth after a refusal is more useful than the stale row that produced it.
  */
@@ -159,13 +166,22 @@ export class StatusStrip {
   /**
    * Why no verb can be pressed: the owning runner is offline, and the workspace is sticky to it.
    * Null unless the row is `UNAVAILABLE`.
+   *
+   * **Says more when the session is still up.** A connected daemon means the container itself is
+   * reachable through the edge regardless of the runner, so the sentence says that in the same
+   * breath rather than leaving a reader to wonder why the file browser still works on a row that
+   * calls itself unavailable.
    */
   protected readonly unavailable = computed<string | null>(() => {
-    if (this.workspace().runtimeStatus !== 'UNAVAILABLE') {
+    const workspace = this.workspace();
+    if (workspace.runtimeStatus !== 'UNAVAILABLE') {
       return null;
     }
-    const runner = this.workspace().runner?.name;
-    return runner ? `runner ${runner} is offline` : 'its runner is offline';
+    const runner = workspace.runner?.name;
+    const base = runner ? `runner ${runner} is offline` : 'its runner is offline';
+    return workspace.daemonConnectedAt
+      ? `${base} — the session is still up; start, stop and recreate wait for the runner`
+      : base;
   });
 
   protected readonly drift = computed(() => {
@@ -191,7 +207,13 @@ export class StatusStrip {
 
   protected readonly daemonState = computed<DaemonState>(() => {
     const workspace = this.workspace();
-    if (workspace.runtimeStatus !== 'RUNNING') {
+    // UNAVAILABLE with a live daemon reads exactly like RUNNING: the control socket rides the
+    // edge, not the runner, so the runner being offline says nothing about whether it is up.
+    // UNAVAILABLE with no reported connection is the one case left with nothing live to show.
+    const sessionLive =
+      workspace.runtimeStatus === 'RUNNING' ||
+      (workspace.runtimeStatus === 'UNAVAILABLE' && workspace.daemonConnectedAt !== null);
+    if (!sessionLive) {
       return 'not-running';
     }
     if (this.reachability() === 'unreachable' || !workspace.daemonConnectedAt) {

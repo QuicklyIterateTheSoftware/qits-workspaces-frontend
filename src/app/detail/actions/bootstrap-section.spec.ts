@@ -23,6 +23,7 @@ const run = (over: Partial<BootstrapRunDto> = {}): BootstrapRunDto => ({
   template: `<app-bootstrap-section
     [workspaceRowId]="id()"
     [runtimeStatus]="runtime()"
+    [daemonConnected]="daemonConnected()"
     [visible]="visible()"
   />`,
 })
@@ -30,6 +31,7 @@ class SectionHost {
   readonly id = signal(7);
   readonly visible = signal(true);
   readonly runtime = signal<WorkspaceRuntimeStatus | null>('RUNNING');
+  readonly daemonConnected = signal(false);
 }
 
 /**
@@ -205,5 +207,45 @@ describe('BootstrapSection', () => {
     expect(text()).toContain('the chain is declared in the container');
     expect(text()).toContain('survive the container');
     expect(element().querySelector('.async-error')).toBeNull();
+  });
+
+  /**
+   * A runner-placed row can report `UNAVAILABLE` with its daemon still reachable through the
+   * edge, independent of the runner — the chain lives in the container the daemon is attached to,
+   * not on the runner's node, so it is just as runnable as it would be on a RUNNING row.
+   */
+  it('runs the chain on UNAVAILABLE when the daemon is still connected', async () => {
+    fixture = TestBed.createComponent(SectionHost);
+    host = fixture.componentInstance;
+    host.runtime.set('UNAVAILABLE');
+    host.daemonConnected.set(true);
+    await settle();
+
+    http.expectOne('/workspaces/container/7/bootstrap-commands').flush({
+      steps: [{ name: 'Migrate', id: 'migrate' }],
+    });
+    http.expectOne('/workspaces/api/workspaces/7/bootstrap-runs').flush({ runs: [] });
+    await settle();
+
+    expect(text()).not.toContain('the chain is declared in the container');
+    expect(stepNames()).toEqual(['Migrate']);
+    expect(
+      (element().querySelector('.step qits-button button') as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it('keeps UNAVAILABLE without a connected daemon reading as gone, unchanged', async () => {
+    fixture = TestBed.createComponent(SectionHost);
+    host = fixture.componentInstance;
+    host.runtime.set('UNAVAILABLE');
+    await settle();
+
+    http
+      .expectOne('/workspaces/container/7/bootstrap-commands')
+      .flush({ message: 'No workspace here.' }, { status: 502, statusText: 'Bad Gateway' });
+    http.expectOne('/workspaces/api/workspaces/7/bootstrap-runs').flush({ runs: [] });
+    await settle();
+
+    expect(text()).toContain('the chain is declared in the container');
   });
 });

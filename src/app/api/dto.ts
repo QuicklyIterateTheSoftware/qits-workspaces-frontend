@@ -42,6 +42,13 @@ export type WorkspaceRuntimeStatus =
  * start and waits for a slot on its runner (or, never placed yet, for any runner). `UNAVAILABLE` is
  * computed and never stored: the owning runner has been offline beyond its reconnect grace, and the
  * workspace is sticky to it, so nothing reassigns it and its verbs answer 409 until it is back.
+ *
+ * **`UNAVAILABLE` is not "no session".** The in-container daemon's control socket rides the edge,
+ * not the runner, so `daemonConnectedAt`, `daemonVersion`, `clean` and `agentActivity` can all still
+ * be live on an `UNAVAILABLE` row — the terminal, files and agent surface keep working even while
+ * the runner that would restart or recreate the container is unreachable. `daemonConnectedAt !==
+ * null` is the one fact that says so; its absence under `UNAVAILABLE` is what actually means the
+ * session is gone.
  */
 export type WorkspacePlacement = 'DIRECT' | 'RUNNER';
 

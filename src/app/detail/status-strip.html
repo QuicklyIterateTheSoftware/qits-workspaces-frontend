@@ -44,8 +44,12 @@
     </span>
     @if (unavailable(); as reason) {
       <p class="note unavailable" role="alert">
-        Start, stop and recreate wait for the runner: {{ reason }}, and this workspace stays on it
-        rather than moving elsewhere.
+        @if (workspace().daemonConnectedAt) {
+          {{ reason }}, and this workspace stays on it rather than moving elsewhere.
+        } @else {
+          Start, stop and recreate wait for the runner: {{ reason }}, and this workspace stays on
+          it rather than moving elsewhere.
+        }
       </p>
     } @else if (recreateBlocked()) {
       <p class="note">{{ recreateBlocked() }}</p>

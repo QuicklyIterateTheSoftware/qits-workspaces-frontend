@@ -333,5 +333,63 @@ describe('StatusStrip', () => {
       expect(verb(direct, 'Stop').disabled).toBe(false);
       expect(verb(direct, 'Recreate').disabled).toBe(false);
     });
+
+    /**
+     * The daemon connects through the edge, not through the runner, so an UNAVAILABLE row with a
+     * live `daemonConnectedAt` still has a fully working session behind it — the runner being
+     * offline only means the lifecycle verbs cannot be routed anywhere.
+     */
+    it('reads a connected daemon on UNAVAILABLE the same way it reads one on RUNNING', async () => {
+      const fixture = await render({
+        placement: 'RUNNER',
+        runtimeStatus: 'UNAVAILABLE',
+        runner: { id: 'r-1', name: 'node-a' },
+        daemonConnectedAt: '2026-08-01T09:00:00Z',
+        daemonVersion: '1.4.0',
+      });
+
+      expect(text(fixture)).toContain('connected');
+      expect(text(fixture)).not.toContain('Files, terminals and the agent surface cannot work');
+      expect(text(fixture)).not.toContain('No container running');
+      expect(text(fixture)).toContain(
+        'runner node-a is offline — the session is still up; start, stop and recreate wait for the runner',
+      );
+      // Start, stop and recreate still wait for the runner regardless of the live session.
+      for (const label of ['Start', 'Recreate']) {
+        expect(verb(fixture, label).disabled).toBe(true);
+      }
+      // And Stop must never appear for a row that is not RUNNING, live session or not.
+      expect(verb(fixture, 'Stop')).toBeUndefined();
+    });
+
+    it('reads UNAVAILABLE as gone when the proxy itself cannot reach a reportedly-connected daemon', async () => {
+      const fixture = await render(
+        {
+          placement: 'RUNNER',
+          runtimeStatus: 'UNAVAILABLE',
+          runner: { id: 'r-1', name: 'node-a' },
+          daemonConnectedAt: '2026-08-01T09:00:00Z',
+        },
+        { reachability: 'unreachable' },
+      );
+
+      expect(text(fixture)).toContain('Files, terminals and the agent surface cannot work right now');
+    });
+
+    it('keeps UNAVAILABLE without a connected daemon reading as not-running, unchanged', async () => {
+      const fixture = await render({
+        placement: 'RUNNER',
+        runtimeStatus: 'UNAVAILABLE',
+        runner: { id: 'r-1', name: 'node-a' },
+        daemonConnectedAt: null,
+      });
+
+      expect(text(fixture)).toContain('No container running, so there is no daemon to reach');
+      expect(text(fixture)).toContain('runner node-a is offline');
+      expect(text(fixture)).not.toContain('the session is still up');
+      for (const label of ['Start', 'Recreate']) {
+        expect(verb(fixture, label).disabled).toBe(true);
+      }
+    });
   });
 });

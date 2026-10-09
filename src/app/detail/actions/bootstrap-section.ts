@@ -265,6 +265,12 @@ export class BootstrapSection {
   /** Read to say *why* the chain is unavailable before the request fails. */
   readonly runtimeStatus = input<WorkspaceRuntimeStatus | null>(null);
 
+  /**
+   * Whether the row's own `daemonConnectedAt` is set — read only for `UNAVAILABLE`, where a
+   * runner being offline does not take the daemon's control socket down with it.
+   */
+  readonly daemonConnected = input(false);
+
   protected readonly chain = signal<Loadable<readonly BootstrapStepDto[]>>(IDLE);
   protected readonly runs = signal<Loadable<readonly BootstrapRunDto[]>>(IDLE);
 
@@ -297,7 +303,11 @@ export class BootstrapSection {
 
   protected readonly containerGone = computed(() => {
     const runtime = this.runtimeStatus();
-    if (runtime !== null && runtime !== 'RUNNING') {
+    // UNAVAILABLE with a connected daemon still has a reachable control socket — the runner being
+    // offline is what blocks the lifecycle verbs, not the chain the daemon can run regardless.
+    const sessionLive =
+      runtime === 'RUNNING' || (runtime === 'UNAVAILABLE' && this.daemonConnected());
+    if (runtime !== null && !sessionLive) {
       return true;
     }
     const state = this.chain();

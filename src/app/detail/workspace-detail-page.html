@@ -88,6 +88,7 @@
             <app-actions-panel
               [workspaceRowId]="ws.id"
               [runtimeStatus]="ws.runtimeStatus"
+              [daemonConnected]="ws.daemonConnectedAt !== null"
               [visible]="selected() === 'actions'"
             />
           } @else if (tab.slug === 'agents') {
