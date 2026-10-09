@@ -84,22 +84,12 @@
             <app-chat-panel [workspaceRowId]="ws.id" [preamble]="rewriteContext()" />
           } @else if (tab.slug === 'files') {
             <app-files-panel [workspaceRowId]="ws.id" [visible]="selected() === 'files'" />
-          } @else if (tab.slug === 'services') {
-            <app-services-panel
-              [workspaceRowId]="ws.id"
-              [repositoryId]="repositoryId()"
-              [workspaceLabel]="ws.workspaceId"
-              [runtimeStatus]="ws.runtimeStatus"
-              [visible]="selected() === 'services'"
-            />
           } @else if (tab.slug === 'actions') {
             <app-actions-panel
               [workspaceRowId]="ws.id"
               [runtimeStatus]="ws.runtimeStatus"
               [visible]="selected() === 'actions'"
             />
-          } @else if (tab.slug === 'web-view') {
-            <app-web-view-panel [workspaceRowId]="ws.id" />
           } @else if (tab.slug === 'agents') {
             <app-agents-panel
               [workspaceRowId]="ws.id"

@@ -140,8 +140,7 @@ export class FilesPanel {
    *
    * The panel is mounted whether or not it is — that is the tab contract — so this is what stops it
    * refetching behind another tab. It is an input rather than something read from a host, because
-   * the policy differs per panel: Chat, Web view and Agents keep working while hidden and this one
-   * must not.
+   * the policy differs per panel: Chat and Agents keep working while hidden and this one must not.
    */
   readonly visible = input(false);
 
@@ -154,7 +153,7 @@ export class FilesPanel {
    *
    * It is the URL rather than a local signal because opening a file costs a request — the house rule
    * is that expensive state is addressable state — and because it is what makes the two entry points
-   * ordinary rather than special: an "open in source" from the Services tab is the same navigation a
+   * ordinary rather than special: an "open in source" from the Agents tab is the same navigation a
    * tree click makes.
    */
   readonly selectedPath = computed(() => this.query$().get('path'));
@@ -197,10 +196,10 @@ export class FilesPanel {
   /**
    * Whether pick mode is armed.
    *
-   * **Sticky across picks**, unlike the web view's one-shot element picker: picking three ranges out
-   * of one file is the normal case, and re-arming between them would be three extra clicks in the
-   * middle of reading. It disarms on a file change, because the mode was about *this* file and a
-   * still-armed gutter in the next one turns a stray click into a reference nobody asked for.
+   * **Sticky across picks**: picking three ranges out of one file is the normal case, and re-arming
+   * between them would be three extra clicks in the middle of reading. It disarms on a file change,
+   * because the mode was about *this* file and a still-armed gutter in the next one turns a stray
+   * click into a reference nobody asked for.
    */
   readonly picking = signal(false);
 

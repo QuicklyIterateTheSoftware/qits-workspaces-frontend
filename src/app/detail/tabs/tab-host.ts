@@ -23,8 +23,8 @@ import type { TabDef } from './tabs';
  * - **`@if (latched)` inside a `[style.display]` wrapper.** `latched` flips true the first time a tab
  *   is selected and never flips back, so a panel is created once, on first selection, and then only
  *   hidden. That is exactly "expensive panels initialise on first selection, then persist", said in
- *   the framework. Rendering all seven eagerly with `display` alone would keep the contract and fire
- *   seven loads on page open; `@if (active)` would fire one load and break the contract.
+ *   the framework. Rendering all five eagerly with `display` alone would keep the contract and fire
+ *   five loads on page open; `@if (active)` would fire one load and break the contract.
  * - **Two loops with two orders.** The strip renders {@link ordered}, which is the user's; the panel
  *   container renders the templates in declaration order, which never changes. Moving a panel in the
  *   document would reload its iframe and reset its scroll — the very thing keep-mounted prevents — so
@@ -36,13 +36,13 @@ import type { TabDef } from './tabs';
  * holding the last one's log. Everything else is declared unconditionally and never prunes.
  *
  * **Panels are not told whether they are visible here.** The page owns `selected` and passes each
- * panel its own `[visible]` input, because the gate that matters is per-panel policy — Chat, Web view
- * and Agents keep working while hidden (a detached socket stops replaying correctly, a reloaded
- * iframe loses the app's state), and everything else stops refetching and does one catch-up read on
- * becoming visible. A host that decided that centrally would be deciding it wrong for three panels.
+ * panel its own `[visible]` input, because the gate that matters is per-panel policy — Chat and
+ * Agents keep working while hidden (a detached socket stops replaying correctly), and everything else
+ * stops refetching and does one catch-up read on becoming visible. A host that decided that centrally
+ * would be deciding it wrong for two panels.
  *
  * Reordering is **in-session only**: a local signal that dies with the page. Per-browser persistence
- * costs a stored-order migration every time a tab is added or renamed, on a row of six.
+ * costs a stored-order migration every time a tab is added or renamed, on a row of four.
  */
 @Component({
   selector: 'app-tab-host',

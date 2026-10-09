@@ -6,7 +6,6 @@ import {
   referenceText,
   serializePrompt,
   type CodeReference,
-  type PickedElement,
 } from './picked-context';
 
 const REFERENCE: CodeReference = {
@@ -16,21 +15,12 @@ const REFERENCE: CodeReference = {
   excerpt: 'bootstrapApplication(App);',
 };
 
-const ELEMENT: PickedElement = {
-  tag: 'button',
-  selector: 'app-home > button.primary',
-  textPreview: 'Save',
-  route: '/settings',
-  componentName: 'HomePage',
-  sourceFiles: ['src/app/home.ts'],
-};
-
 /**
- * The seam between the two pickers and the one prompt panel.
+ * The seam between the Files picker and the one prompt panel.
  *
- * The Files viewer and the Web view land in later workstreams and write here; the panel reads. The
- * picks are work product, so they ride the prompt draft rather than the browser — which is why the
- * blob's schema is the client's own and has to survive being written by an older build.
+ * The Files viewer lands in a later workstream and writes here; the panel reads. The picks are work
+ * product, so they ride the prompt draft rather than the browser — which is why the blob's schema is
+ * the client's own and has to survive being written by an older build.
  */
 describe('PickedContext', () => {
   let picked: PickedContext;
@@ -57,15 +47,6 @@ describe('PickedContext', () => {
     expect(picked.references()).toHaveLength(1);
   });
 
-  it('unpicks an element that is picked again, as the frame’s own toggle does', () => {
-    picked.use(7);
-    picked.toggleElement(ELEMENT);
-    expect(picked.elements()).toHaveLength(1);
-
-    picked.toggleElement(ELEMENT);
-    expect(picked.elements()).toHaveLength(0);
-  });
-
   it('removes a reference by its label', () => {
     picked.use(7);
     picked.addReference(REFERENCE);
@@ -83,32 +64,29 @@ describe('referenceLabel', () => {
 
 describe('parseComposition', () => {
   it('reads what was written', () => {
-    const blob = JSON.stringify({ text: 'hello', references: [REFERENCE], elements: [ELEMENT] });
+    const blob = JSON.stringify({ text: 'hello', references: [REFERENCE] });
     expect(parseComposition(blob)).toEqual({
       text: 'hello',
       references: [REFERENCE],
-      elements: [ELEMENT],
     });
   });
 
   it('degrades to an empty composition rather than throwing on a blob it cannot read', () => {
     // The host validates only that the blob is JSON. A blob from an older build, or from a hand,
     // has to be no worse than "no draft".
-    expect(parseComposition('not json')).toEqual({ text: '', references: [], elements: [] });
-    expect(parseComposition('[]')).toEqual({ text: '', references: [], elements: [] });
-    expect(parseComposition('{"text":42}')).toEqual({ text: '', references: [], elements: [] });
+    expect(parseComposition('not json')).toEqual({ text: '', references: [] });
+    expect(parseComposition('[]')).toEqual({ text: '', references: [] });
+    expect(parseComposition('{"text":42}')).toEqual({ text: '', references: [] });
   });
 });
 
 describe('serializePrompt', () => {
   it('is the typed text when nothing was picked', () => {
-    expect(serializePrompt({ text: 'do the thing', references: [], elements: [] })).toBe(
-      'do the thing',
-    );
+    expect(serializePrompt({ text: 'do the thing', references: [] })).toBe('do the thing');
   });
 
   it('appends a pick the user never inserted, so the chips do not lie', () => {
-    const prompt = serializePrompt({ text: 'fix this', references: [REFERENCE], elements: [] });
+    const prompt = serializePrompt({ text: 'fix this', references: [REFERENCE] });
 
     expect(prompt).toContain('fix this');
     expect(prompt).toContain('Context picked in the workspace');
@@ -117,13 +95,13 @@ describe('serializePrompt', () => {
 
   it('does not append a pick that is already in the text', () => {
     const text = `look at ${referenceText(REFERENCE)}`;
-    const prompt = serializePrompt({ text, references: [REFERENCE], elements: [] });
+    const prompt = serializePrompt({ text, references: [REFERENCE] });
 
     expect(prompt).toBe(text);
     expect(prompt).not.toContain('Context picked in the workspace');
   });
 
   it('is empty when there is nothing to say, so an empty draft cannot be launched', () => {
-    expect(serializePrompt({ text: '   ', references: [], elements: [] })).toBe('');
+    expect(serializePrompt({ text: '   ', references: [] })).toBe('');
   });
 });

@@ -24,7 +24,6 @@ import { describeError } from '../../ui/loadable';
 import { LevelMeter } from './level-meter';
 import {
   PickedContext,
-  elementText,
   parseComposition,
   referenceLabel,
   referenceText,
@@ -225,7 +224,6 @@ export class PromptPanel {
   protected readonly composition = computed<DraftComposition>(() => ({
     text: this.text(),
     references: this.picked.references(),
-    elements: this.picked.elements(),
   }));
 
   /** Whether there is anything to launch with. An empty prompt is not a launch. */
@@ -304,32 +302,6 @@ export class PromptPanel {
         startLine: reference.startLine,
         endLine: reference.endLine,
       });
-    }
-  }
-
-  /**
-   * Open a picked element's source file in the viewer.
-   *
-   * **The closest match, not the exact path.** A component map is a fact about the tree when it was
-   * scanned, and a rename between the pick and the press must not become a dead link — so the file
-   * browser seeds its name filter with the path exactly as if it had been typed, narrows, and lets
-   * the user see *why*. A browser that silently jumped somewhere near where you asked would be worse
-   * than one that missed.
-   */
-  /** The last segment, which is what fits on a chip. The full path is the title. */
-  protected fileName(path: string): string {
-    const at = path.lastIndexOf('/');
-    return at === -1 ? path : path.slice(at + 1);
-  }
-
-  protected openSource(path: string): void {
-    this.nav.openClosest(path);
-  }
-
-  protected insertElement(index: number): void {
-    const element = this.picked.elements()[index];
-    if (element) {
-      this.insert(elementText(element));
     }
   }
 
@@ -526,8 +498,8 @@ export class PromptPanel {
    * Flush, then launch as a chat.
    *
    * The flush is awaited and its failure is fatal to the launch. `deliverTaskPrompt` stays false and
-   * the composed prompt rides `initialContext`: text, code references and picked elements are all
-   * text, and the fetch path exists only for images, which are phase two.
+   * the composed prompt rides `initialContext`: text and code references are all text, and the fetch
+   * path exists only for images, which are phase two.
    */
   protected async launchChat(): Promise<void> {
     if (!this.canLaunch()) {

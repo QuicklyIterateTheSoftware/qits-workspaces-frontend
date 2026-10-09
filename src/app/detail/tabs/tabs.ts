@@ -1,10 +1,12 @@
 /**
  * What a tab is, and which tabs there are.
  *
- * Six tabs plus one transient, which is the answer to "ten is a lot". Sketch is gone (it does not
+ * Four tabs plus one transient, which is the answer to "ten is a lot". Sketch is gone (it does not
  * survive a reload and pasting a screenshot covers the same delivery path), Bootstrap is a section
  * inside Actions (its entire per-workspace content is three lines of status), and Telemetry is phase
- * two (real, cheap, and the one surface with no live hint to refresh it).
+ * two (real, cheap, and the one surface with no live hint to refresh it). Services and Web view are
+ * gone too: the workspace container no longer supervises dev servers, so there is nothing left for
+ * either tab to show.
  */
 
 /** How loud a tab's label dot is. */
@@ -40,10 +42,10 @@ export interface TabDef {
 export const STARTING_SLUG = 'starting';
 
 /**
- * The six durable tabs, in their default order.
+ * The four durable tabs, in their default order.
  *
  * The order is what a fresh page opens with; dragging rewrites it for the session and nothing else.
- * Per-browser persistence was dropped deliberately: it buys per-device ergonomics on a row of six
+ * Per-browser persistence was dropped deliberately: it buys per-device ergonomics on a row of four
  * and costs a stored-order migration every time a tab is added or renamed — which this
  * reimplementation is doing on day one. The asymmetry is worth keeping either way: tab order is
  * device ergonomics, and the prompt draft is work product and lives on the server.
@@ -51,9 +53,7 @@ export const STARTING_SLUG = 'starting';
 export const DURABLE_TABS: readonly TabDef[] = [
   { slug: 'chat', label: 'Chat', inUrl: true },
   { slug: 'files', label: 'Files', inUrl: true },
-  { slug: 'services', label: 'Services', inUrl: true },
   { slug: 'actions', label: 'Actions', inUrl: true },
-  { slug: 'web-view', label: 'Web view', inUrl: true },
   { slug: 'agents', label: 'Agents', inUrl: true },
 ];
 

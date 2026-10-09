@@ -32,8 +32,8 @@ const UNREACHABLE_STATUSES: readonly number[] = [0, 502, 503, 504];
  * one daemon.
  *
  * **This class is the transport and deliberately not the API.** The typed clients — files, content,
- * detection, commands, actions, agents, sessions, plugins, services, bootstrap, prompt refinement —
- * are written against the daemon's own contract by the workstreams that need them, each one calling
+ * detection, commands, actions, agents, sessions, plugins, bootstrap, prompt refinement — are
+ * written against the daemon's own contract by the workstreams that need them, each one calling
  * {@link get} or {@link post}. Putting them all here would make one file that every later change
  * touches, and none of them can be written honestly before the panel that reads them exists.
  *

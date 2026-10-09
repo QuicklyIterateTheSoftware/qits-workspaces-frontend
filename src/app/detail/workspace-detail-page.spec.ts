@@ -70,7 +70,7 @@ const workspace = (id: number, label: string, over: Partial<WorkspaceDto> = {}):
  * previous workspace.
  *
  * **A resolved workspace does not get a detail view.** It is not in the active list at all, its
- * container is gone, and six tabs that every one of them 502s would be worse than an honest record.
+ * container is gone, and four tabs that every one of them 502s would be worse than an honest record.
  */
 describe('WorkspaceDetailPage', () => {
   let http: HttpTestingController;

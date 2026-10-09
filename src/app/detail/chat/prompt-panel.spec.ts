@@ -143,7 +143,6 @@ describe('PromptPanel', () => {
         content: JSON.stringify({
           text: 'last week’s idea',
           references: [{ path: 'src/main.ts', startLine: 1, endLine: 2, excerpt: 'bootstrap();' }],
-          elements: [],
         }),
         updatedAt: '2026-08-01T09:00:00Z',
       },
@@ -166,7 +165,6 @@ describe('PromptPanel', () => {
           references: [
             { path: 'service/src/App.java', startLine: 12, endLine: 20, excerpt: 'run();' },
           ],
-          elements: [],
         }),
         updatedAt: '2026-08-01T09:00:00Z',
       },
@@ -487,7 +485,6 @@ describe('PromptPanel', () => {
         content: JSON.stringify({
           text: 'old',
           references: [{ path: 'a.ts', startLine: 1, endLine: 1, excerpt: 'x' }],
-          elements: [],
         }),
         updatedAt: 'T0',
       },

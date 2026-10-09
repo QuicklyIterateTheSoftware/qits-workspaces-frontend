@@ -417,63 +417,6 @@ export interface IntegrateResponse {
   readonly targetBranch: string;
 }
 
-/** How loud a service event is. Set on the event, never derived from its text. */
-export type ServiceEventSeverity = 'INFO' | 'WARNING' | 'ERROR';
-
-/**
- * What a service event reports.
- *
- * `STATUS_CHANGED` is the only member, and the enum has only ever had one: the classified-error kind
- * belonged to the per-line log observers that were deleted upstream. It is a type rather than a
- * constant because the wire carries the name, and a client that pinned the string would be claiming
- * a newer service cannot invent a second one.
- */
-export type ServiceEventKind = 'STATUS_CHANGED';
-
-/** The supervisor state a `STATUS_CHANGED` event is reporting. */
-export type ServiceEventStatus = 'STARTING' | 'READY' | 'RESTARTING' | 'CRASHED' | 'STOPPED';
-
-/**
- * One durable thing that happened to a service.
- *
- * **This is the only place a browser can see a `CRASHED`.** The live list flattens every terminal
- * state to `STOPPED` — a service that dies leaves the supervisor's map — so the transition survives
- * here and nowhere else a client can reach. That is what makes the feed a section of the Services
- * panel rather than a nicety beside it.
- *
- * **`workspaceId` is the branch-derived label and `workspaceRowId` is the identity**, and the gap
- * between them is a real trap: the feed's server-side filter takes the *label*, which is unique only
- * among ACTIVE workspaces and is **reused once a workspace resolves**. Filtering by it alone
- * therefore surfaces a previous workspace's events on a recycled name. The row id is carried for
- * exactly this reason and the client filters on it — see `service-events-feed.ts`.
- *
- * The anchor fields (`source`, `anchorFrom`, `anchorTo`, `sourceEpoch`) are null on plain status
- * transitions, which is every event this platform still produces.
- */
-export interface ServiceEventDto {
-  readonly repoId: string;
-  readonly workspaceId: string;
-  readonly workspaceRowId: number | null;
-  readonly serviceId: string;
-  readonly serviceName: string;
-  readonly kind: ServiceEventKind;
-  readonly severity: ServiceEventSeverity;
-  readonly status: ServiceEventStatus | null;
-  readonly summary: string | null;
-  readonly logExcerpt: string | null;
-  readonly commandId: string | null;
-  readonly source: string | null;
-  readonly anchorFrom: number | null;
-  readonly anchorTo: number | null;
-  readonly sourceEpoch: string | null;
-  readonly timestamp: string;
-}
-
-/** The service-event feed envelope. */
-export interface ServiceEventsResponse {
-  readonly events: readonly ServiceEventDto[];
-}
-
 /** How a bootstrap step's most recent run ended. */
 export type BootstrapOutcome = 'SKIPPED' | 'SUCCEEDED' | 'FAILED';
 

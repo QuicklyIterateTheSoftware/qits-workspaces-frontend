@@ -25,7 +25,7 @@ export class FileNavigation {
   private readonly router = inject(Router);
 
   /**
-   * **Open at an exact line range.** A service event's "open in source" and a chat reference row.
+   * **Open at an exact line range.** A chat reference row and an agent transcript path.
    *
    * The path is taken at its word and is **not** looked for in the tree: `/files/content` consults
    * git for nothing, so a log or a generated file — neither of which is in the listing — opens
@@ -36,8 +36,8 @@ export class FileNavigation {
   }
 
   /**
-   * **Open the closest match to a path that may have moved.** A picked element's attribution, which
-   * outlives renames.
+   * **Open the closest match to a path that may have moved.** For a caller that only knows a path as
+   * of some earlier moment, and has to admit a rename may have happened since.
    *
    * It seeds the name filter with the path *exactly as if the user had typed it*, so the tree
    * narrows and expands and the user can see **why** — a browser that silently jumped somewhere near

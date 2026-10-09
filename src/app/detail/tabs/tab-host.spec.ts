@@ -57,8 +57,8 @@ class ProbeHost {
  * break all of that silently, which is why the probe counts constructions rather than looking for a
  * DOM node.
  *
- * **They mount on first selection and not before.** Rendering all six eagerly would keep the contract
- * and fire six panels' worth of requests on every page load, on a page where five of them may never
+ * **They mount on first selection and not before.** Rendering all four eagerly would keep the contract
+ * and fire four panels' worth of requests on every page load, on a page where three of them may never
  * be opened.
  *
  * **Reordering moves the buttons and nothing else.** The strip renders the user's order and the panel

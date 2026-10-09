@@ -136,7 +136,7 @@ describe('WorkspaceEvents', () => {
   it('schedules nothing — the channel replaces polling rather than joining it', () => {
     events.open(7);
     opened[0].connect();
-    opened[0].emit('services');
+    opened[0].emit('commands');
     vi.advanceTimersByTime(60 * 60 * 1000);
 
     expect(vi.getTimerCount()).toBe(0);

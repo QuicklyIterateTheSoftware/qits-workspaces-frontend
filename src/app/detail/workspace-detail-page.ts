@@ -21,7 +21,6 @@ import { ProjectsApi } from '../api/projects-api';
 import { WorkspaceCommands } from '../api/workspace-commands';
 import { WorkspaceDaemonApi } from '../api/workspace-daemon-api';
 import { WorkspaceEvents, anyOf } from '../api/workspace-events';
-import { WorkspaceServices } from '../api/workspace-services';
 import { WorkspacesApi } from '../api/workspaces-api';
 import type { MergeResult } from '../merge/merge-outcome';
 import { Async } from '../ui/async';
@@ -42,13 +41,11 @@ import { EMPTY_CONVERSATION, buildConversation } from './chat/chat-model';
 import { Conversation } from './chat/conversation';
 import { FilesPanel } from './files/files-panel';
 import { PanelPlaceholder } from './panel-placeholder';
-import { ServicesPanel } from './services/services-panel';
 import { StartingPanel } from './starting/starting-panel';
 import { StatusStrip } from './status-strip';
 import { TabHost } from './tabs/tab-host';
 import { TabPanel } from './tabs/tab-panel';
 import { DEFAULT_TAB, DURABLE_TABS, STARTING_SLUG, isDurableTab, type TabDef } from './tabs/tabs';
-import { WebViewPanel } from './web-view/web-view-panel';
 
 /**
  * How long the transient tab stays after its operation finishes.
@@ -123,12 +120,10 @@ const PANEL_NOTES: Readonly<Record<string, string>> = {};
     Empty,
     FilesPanel,
     PanelPlaceholder,
-    ServicesPanel,
     StartingPanel,
     StatusStrip,
     TabHost,
     TabPanel,
-    WebViewPanel,
   ],
   templateUrl: './workspace-detail-page.html',
   styleUrl: './workspace-detail-page.css',
@@ -139,7 +134,6 @@ export class WorkspaceDetailPage {
   private readonly daemon = inject(WorkspaceDaemonApi);
   private readonly events = inject(WorkspaceEvents);
   private readonly memory = inject(AgentActivityMemory);
-  private readonly serviceEntry = inject(WorkspaceServices);
   private readonly commandEntry = inject(WorkspaceCommands);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
@@ -478,10 +472,10 @@ export class WorkspaceDetailPage {
   /**
    * A terminal run this workspace is doing that no agent is driving — the Actions dot.
    *
-   * The split is deliberate and each dot points at its own tab: a chat has the Chat tab's, an agent
-   * run has the Agents tab's, and a service has the Services tab's. The history list below still
-   * shows every one of them; it is only the *label* that is narrowed, so a glance at the strip says
-   * which tab to open rather than merely that something is happening somewhere.
+   * The split is deliberate and each dot points at its own tab: a chat has the Chat tab's and an
+   * agent run has the Agents tab's. The history list below still shows every one of them; it is only
+   * the *label* that is narrowed, so a glance at the strip says which tab to open rather than merely
+   * that something is happening somewhere.
    *
    * "Agent-driven" is read off `agentSessions` rather than off the kind, because an interactive agent
    * launch is a PTY like any other terminal run — what makes it the agent's is that a session is
@@ -501,19 +495,18 @@ export class WorkspaceDetailPage {
   });
 
   /**
-   * The row: the transient tab when there is one, then the six.
+   * The row: the transient tab when there is one, then the four.
    *
    * **Every dot here is drawn from something already in hand, and none of them costs a request.** The
-   * Agents dot reads the workspace entry the strip already holds; the Services and Actions dots read
-   * the two shared entries, which answer "nothing to say" until a panel has asked for them. That is
-   * what keeps the shell's load budget at what it says it is: a dot on a tab nobody has opened would
-   * otherwise mean a fetch on every page open for a tab nobody may visit, on a screen whose stated
-   * property is that an idle workspace produces no traffic at all. Absence of a dot means "not
-   * asked", never "nothing running", and one click resolves it.
+   * Agents dot reads the workspace entry the strip already holds; the Actions dot reads the shared
+   * entry, which answers "nothing to say" until a panel has asked for it. That is what keeps the
+   * shell's load budget at what it says it is: a dot on a tab nobody has opened would otherwise mean
+   * a fetch on every page open for a tab nobody may visit, on a screen whose stated property is that
+   * an idle workspace produces no traffic at all. Absence of a dot means "not asked", never "nothing
+   * running", and one click resolves it.
    */
   protected readonly tabs = computed<readonly TabDef[]>(() => {
     const activity = this.workspace()?.agentActivity ?? null;
-    const servicesDot = this.serviceEntry.dot();
     const running = this.runningAction();
     const durable = DURABLE_TABS.map((tab) => {
       if (tab.slug === 'agents' && activity) {
@@ -523,9 +516,6 @@ export class WorkspaceDetailPage {
           dotTitle:
             activity === 'BUSY' ? 'The agent is working' : `Agent ${activity.toLowerCase()}`,
         };
-      }
-      if (tab.slug === 'services' && servicesDot) {
-        return { ...tab, dot: servicesDot, dotTitle: this.serviceEntry.dotTitle() };
       }
       if (tab.slug === 'actions' && running) {
         return { ...tab, dot: 'accent' as const, dotTitle: 'An action is running' };
