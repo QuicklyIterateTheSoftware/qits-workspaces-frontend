@@ -20,11 +20,10 @@ export type CommandStatus = 'RUNNING' | 'EXITED' | 'TERMINATED' | 'INTERRUPTED';
 /**
  * What the frontend routes its view on.
  *
- * `TERMINAL` is an interactive PTY, `CHAT` is a coding-agent session over line-delimited JSON on
- * pipes, and `SERVICE` is carried because it is part of the shape — this surface does not launch
- * services, `/services` does.
+ * `TERMINAL` is an interactive PTY, and `CHAT` is a coding-agent session over line-delimited JSON
+ * on pipes.
  */
-export type CommandKind = 'TERMINAL' | 'CHAT' | 'SERVICE';
+export type CommandKind = 'TERMINAL' | 'CHAT';
 
 /** Which harness ran, or is to run. */
 export type AgentType = 'CLAUDE' | 'KIMI';
