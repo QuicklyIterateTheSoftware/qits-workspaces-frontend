@@ -35,8 +35,8 @@ export type TerminalTarget =
  * somebody opened one, and the plugin store.
  *
  * A terminal here is a command's PTY socket (`WS /terminal/commands/{id}`). The browser starts no
- * harness (qits-1152): the service starts each agent, by default as a chat. So for a chat agent this
- * tab says where its conversation is instead of drawing a terminal.
+ * harness (qits-1152): the service starts each agent, by default in a terminal, so this tab is an
+ * agent's live view. For an agent that runs as a chat it says where its conversation is instead.
  *
  * The socket stays attached while the tab is hidden, so the screen survives a tab switch. Closing
  * detaches; it never stops the process.

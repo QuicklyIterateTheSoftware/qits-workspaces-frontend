@@ -22,16 +22,23 @@ import { EMPTY_CONVERSATION, buildConversation } from './chat-model';
 import { Conversation } from './conversation';
 import { PromptPanel } from './prompt-panel';
 
+/** How often a terminal agent's transcript is read again while its harness runs. */
+export const TRANSCRIPT_POLL_MS = 3000;
+
 /**
  * One agent's conversation: watch it work, or say the next thing.
  *
  * **On first open this panel reads `1`, plus one socket while the agent's chat runs.** The read is
- * the container's command list, a shared entry the Terminal tab reads too.
+ * the container's command list, a shared entry the Terminal tab reads too. An agent in a terminal
+ * adds its transcript read, repeated every {@link TRANSCRIPT_POLL_MS} while the harness runs.
  *
  * The agent's harness is one command, named by the daemon's worktree read (`commandId`). While that
  * command is a running `CHAT`, this tab attaches to its socket and a typed turn goes down it. When it
  * is not — the agent yielded, is queued, or runs in a terminal — the prompt panel sends the turn
  * through the service's delivery door, which resumes the agent to hear it (qits-1152).
+ *
+ * An agent in a terminal (the default) has its live screen on the Terminal tab. Here it shows its
+ * transcript, read-only, from the daemon's command log: the same lines a chat replays.
  *
  * The live tail covers the main session only; sub-agent side-chains join when the run ends, and the
  * header says so while the run is live.
@@ -79,6 +86,13 @@ export class ChatPanel {
   private readonly socket = signal<ChatSocket | null>(null);
   private readonly attached = signal<string | null>(null);
 
+  /** A terminal agent's transcript lines, and the command they belong to. */
+  private readonly transcript = signal<{
+    readonly commandId: string;
+    readonly lines: readonly string[];
+  } | null>(null);
+  private transcriptPoll: ReturnType<typeof setInterval> | null = null;
+
   constructor() {
     effect(() => {
       const workspaceRowId = this.workspaceRowId();
@@ -91,7 +105,20 @@ export class ChatPanel {
       untracked(() => this.attach(workspaceRowId, command?.id ?? null));
     });
 
-    inject(DestroyRef).onDestroy(() => this.detach());
+    // A terminal agent's transcript: read once, then again on a timer while the harness runs. A
+    // stop re-runs this, so the last lines are read once more.
+    // Keyed by id and running, not by the command object, so a list refresh does not restart it.
+    effect(() => {
+      const commandId = this.terminalHarness()?.id ?? null;
+      const running = this.inTerminal();
+      const workspaceRowId = this.workspaceRowId();
+      untracked(() => this.followTranscript(workspaceRowId, commandId, running));
+    });
+
+    inject(DestroyRef).onDestroy(() => {
+      this.detach();
+      this.stopTranscriptPoll();
+    });
   }
 
   // ---- which conversation, if any ----------------------------------------------------------------
@@ -112,10 +139,24 @@ export class ChatPanel {
     return command && command.kind === 'CHAT' && command.status === 'RUNNING' ? command : null;
   });
 
-  /** The agent runs its harness in a terminal: its screen is on the Terminal tab. */
-  protected readonly inTerminal = computed(() => {
+  /** The agent's harness when it is a terminal, running or not. */
+  private readonly terminalHarness = computed<CommandDto | null>(() => {
     const command = this.harness();
-    return command !== null && command.kind === 'TERMINAL' && command.status === 'RUNNING';
+    return command !== null && command.kind === 'TERMINAL' ? command : null;
+  });
+
+  /** The agent runs its harness in a terminal: its screen is on the Terminal tab. */
+  protected readonly inTerminal = computed(() => this.terminalHarness()?.status === 'RUNNING');
+
+  /** A terminal agent's conversation, from its transcript. Null for any other agent. */
+  protected readonly transcriptConversation = computed(() => {
+    const command = this.terminalHarness();
+    const transcript = this.transcript();
+    if (!command) {
+      return null;
+    }
+    const lines = transcript?.commandId === command.id ? transcript.lines : [];
+    return lines.length === 0 ? EMPTY_CONVERSATION : buildConversation(lines);
   });
 
   /** Whether the prompt panel can be drawn: the list answered, or there is no container to ask. */
@@ -188,6 +229,45 @@ export class ChatPanel {
 
   protected retry(): void {
     void this.commands.refresh();
+  }
+
+  // ---- a terminal agent's transcript --------------------------------------------------------------
+
+  private followTranscript(
+    workspaceRowId: number,
+    commandId: string | null,
+    running: boolean,
+  ): void {
+    this.stopTranscriptPoll();
+    if (!commandId || workspaceRowId <= 0) {
+      return;
+    }
+    void this.readTranscript(workspaceRowId, commandId);
+    if (running) {
+      this.transcriptPoll = setInterval(
+        () => void this.readTranscript(workspaceRowId, commandId),
+        TRANSCRIPT_POLL_MS,
+      );
+    }
+  }
+
+  private stopTranscriptPoll(): void {
+    if (this.transcriptPoll !== null) {
+      clearInterval(this.transcriptPoll);
+      this.transcriptPoll = null;
+    }
+  }
+
+  /** A failed read keeps what is shown; the next one tries again. */
+  private async readTranscript(workspaceRowId: number, commandId: string): Promise<void> {
+    try {
+      const lines = await this.api.transcript(workspaceRowId, commandId);
+      if (this.terminalHarness()?.id === commandId) {
+        this.transcript.set({ commandId, lines });
+      }
+    } catch {
+      // The command list and the daemon's reachability already say when the container is gone.
+    }
   }
 
   // ---- the socket ---------------------------------------------------------------------------------

@@ -78,6 +78,23 @@ describe('CommandsApi', () => {
     await answer;
   });
 
+  it('reads a command’s transcript channel, in sequence order', async () => {
+    const answer = api.transcript(7, 'cmd-1');
+    const request = http.expectOne(
+      (req) => req.url === '/workspaces/container/7/commands/cmd-1/log',
+    );
+    request.flush({
+      lines: [
+        { sequence: 2, channel: 'TRANSCRIPT', content: '{"b":2}', timestamp: 't' },
+        { sequence: 1, channel: 'TRANSCRIPT', content: '{"a":1}', timestamp: 't' },
+      ],
+    });
+
+    expect(request.request.method).toBe('GET');
+    expect(request.request.params.get('channel')).toBe('TRANSCRIPT');
+    expect(await answer).toEqual(['{"a":1}', '{"b":2}']);
+  });
+
   it('terminates by id and answers the command in its post-terminate state', async () => {
     const answer = api.terminate(7, 'cmd-1');
     const request = http.expectOne('/workspaces/container/7/commands/cmd-1/terminate');

@@ -82,8 +82,13 @@
   <header class="strip">
     @if (inTerminal()) {
       <p class="reassure">
-        This agent runs in a terminal; its screen is on the Terminal tab. A message sent here is
-        typed into it.
+        This agent runs in a terminal; its live screen is on the Terminal tab. Below is its
+        transcript, read-only. A message sent here is typed into it.
+      </p>
+    } @else if (transcriptConversation()) {
+      <p class="reassure">
+        This agent's terminal has stopped. Below is its transcript. A message sent here resumes it
+        to hear it.
       </p>
     } @else {
       <p class="reassure">
@@ -91,6 +96,15 @@
       </p>
     }
   </header>
+  @if (transcriptConversation(); as transcript) {
+    <section class="log" aria-label="The transcript" aria-live="polite">
+      @if (transcript.items.length === 0) {
+        <p class="note">The transcript has nothing in it yet.</p>
+      } @else {
+        <app-conversation [items]="transcript.items" />
+      }
+    </section>
+  }
   @if (lastSent(); as note) {
     <p class="note" role="status">{{ note }}</p>
   }

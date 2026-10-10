@@ -90,6 +90,16 @@ interface CommandListResponse {
   readonly entries: readonly CommandEnvelope[];
 }
 
+/** One captured line of a command's log. Only the fields the transcript read needs. */
+interface CommandLogLineDto {
+  readonly sequence: number;
+  readonly content: string;
+}
+
+interface CommandLogResponse {
+  readonly lines?: readonly CommandLogLineDto[];
+}
+
 /** What `POST /prompt-refinements` answers. */
 interface RefinementResponse {
   readonly prompt: string;
@@ -112,6 +122,24 @@ export class CommandsApi {
   async commands(workspaceRowId: number): Promise<readonly CommandDto[]> {
     const answer = await this.daemon.get<CommandListResponse>(workspaceRowId, '/commands');
     return (answer.entries ?? []).map((entry) => entry.command);
+  }
+
+  /**
+   * A command's agent transcript so far: the harness's own JSONL lines, in order.
+   *
+   * For an agent in a terminal this is the conversation: the daemon tails the transcript while the
+   * run is live (qits-1152), and the PTY stream is only the screen. The lines are what
+   * `buildConversation` reads, the same shape a chat replays.
+   */
+  async transcript(workspaceRowId: number, commandId: string): Promise<readonly string[]> {
+    const answer = await this.daemon.get<CommandLogResponse>(
+      workspaceRowId,
+      `/commands/${encodeURIComponent(commandId)}/log`,
+      { channel: 'TRANSCRIPT' },
+    );
+    return [...(answer.lines ?? [])]
+      .sort((a, b) => a.sequence - b.sequence)
+      .map((line) => line.content);
   }
 
   /**

@@ -3,10 +3,11 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { EVENT_SOURCE_FACTORY, type EventSourceLike } from '../../api/event-source';
+import { WorkspaceCommands } from '../../api/workspace-commands';
 import { WorkspaceEvents } from '../../api/workspace-events';
 import { WEB_SOCKET_FACTORY, WEB_SOCKET_OPEN, type WebSocketLike } from '../../api/web-socket';
 import type { CommandDto } from '../../api/commands-api';
-import { ChatPanel } from './chat-panel';
+import { ChatPanel, TRANSCRIPT_POLL_MS } from './chat-panel';
 import { SPEECH_RUNTIME, type SpeechRuntime } from './speech-runtime';
 
 class FakeStream implements EventSourceLike {
@@ -147,6 +148,20 @@ describe('ChatPanel', () => {
 
   const latest = () => sockets[sockets.length - 1];
 
+  const TRANSCRIPT_URL = '/workspaces/container/7/commands/cmd-1/log';
+
+  const transcriptReads = () =>
+    http.match((req) => req.url === TRANSCRIPT_URL && req.params.get('channel') === 'TRANSCRIPT');
+
+  const transcriptLines = (...lines: object[]) => ({
+    lines: lines.map((line, index) => ({
+      sequence: index + 1,
+      channel: 'TRANSCRIPT',
+      content: JSON.stringify(line),
+      timestamp: '2026-08-01T10:00:00Z',
+    })),
+  });
+
   const text = (): string => fixture.nativeElement.textContent ?? '';
 
   it('reads the command list and nothing else of its own', async () => {
@@ -175,13 +190,55 @@ describe('ChatPanel', () => {
     expect(text()).toContain('Switching tabs keeps the agent running');
   });
 
-  it('points a terminal agent at the Terminal tab', async () => {
+  it('points a terminal agent at the Terminal tab and shows its transcript read-only', async () => {
     await listing([{ ...chat('cmd-1', 'RUNNING'), kind: 'TERMINAL' }]);
+    const [read] = transcriptReads();
+    read.flush(
+      transcriptLines(
+        { type: 'user', message: { content: [{ type: 'text', text: 'add a health check' }] } },
+        { type: 'assistant', message: { content: [{ type: 'text', text: 'On it.' }] } },
+      ),
+    );
     http.expectOne(DRAFT_URL).flush({ message: 'none' }, { status: 404, statusText: 'Not Found' });
     await settle();
 
     expect(sockets).toHaveLength(0);
-    expect(text()).toContain('its screen is on the Terminal tab');
+    expect(text()).toContain('its live screen is on the Terminal tab');
+    expect(text()).toContain('add a health check');
+    expect(text()).toContain('On it.');
+    // Read-only: no chat composer, only the prompt panel and its delivery door.
+    expect(fixture.nativeElement.querySelector('footer.compose')).toBeNull();
+    expect(fixture.nativeElement.querySelector('app-prompt-panel')).not.toBeNull();
+  });
+
+  it('reads a running terminal’s transcript again on a timer, and not once it stops', async () => {
+    await listing([{ ...chat('cmd-1', 'RUNNING'), kind: 'TERMINAL' }]);
+    transcriptReads()[0].flush(transcriptLines());
+    http.expectOne(DRAFT_URL).flush({ message: 'none' }, { status: 404, statusText: 'Not Found' });
+    await settle();
+
+    vi.advanceTimersByTime(TRANSCRIPT_POLL_MS);
+    const [again] = transcriptReads();
+    again.flush(
+      transcriptLines({
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'Done.' }] },
+      }),
+    );
+    await settle();
+    expect(text()).toContain('Done.');
+
+    const refreshed = TestBed.inject(WorkspaceCommands).refresh();
+    commands().flush({ entries: [{ command: { ...chat('cmd-1', 'EXITED'), kind: 'TERMINAL' } }] });
+    await refreshed;
+    await settle();
+    // One last read for the lines written before it stopped, then no more.
+    transcriptReads()[0].flush(transcriptLines());
+    await settle();
+    vi.advanceTimersByTime(TRANSCRIPT_POLL_MS * 3);
+
+    expect(transcriptReads()).toHaveLength(0);
+    expect(text()).toContain('terminal has stopped');
   });
 
   it('leaves another agent’s chat alone, even when it runs', async () => {

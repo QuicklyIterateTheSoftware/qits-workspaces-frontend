@@ -21,6 +21,7 @@ import {
 import { AgentWorktreesApi, type AgentWorktreeDto } from '../api/agent-worktrees-api';
 import type { AgentDto, AgentWaitDto } from '../api/dto';
 import { WorkspaceAgentsApi } from '../api/workspace-agents-api';
+import { WorkspaceCommands } from '../api/workspace-commands';
 import { WorkspaceDaemonApi } from '../api/workspace-daemon-api';
 import { WorkspaceEvents, anyOf } from '../api/workspace-events';
 import { Async } from '../ui/async';
@@ -39,7 +40,7 @@ import { ChatPanel } from './chat/chat-panel';
 import { FilesPanel } from './files/files-panel';
 import { TabHost } from './tabs/tab-host';
 import { TabPanel } from './tabs/tab-panel';
-import { DEFAULT_TAB, DURABLE_TABS, isDurableTab, type TabDef } from './tabs/tabs';
+import { DURABLE_TABS, isDurableTab, type TabDef } from './tabs/tabs';
 import { TerminalPanel } from './terminal/terminal-panel';
 
 /** How often a queued agent is read again. It has no workspace, so no hint channel tells us. */
@@ -82,7 +83,8 @@ export function waitLabel(wait: AgentWaitDto): string {
  * {@link QUEUED_POLL_MS} until it is placed.
  *
  * `/agents/{agentId}?tab=…`: the tab is a query parameter, so a tab switch keeps the page and an
- * agent switch remounts it.
+ * agent switch remounts it. With no tab named, an agent opens on Terminal, its live screen, since
+ * the service starts every agent in a terminal; one whose harness is a chat opens on Chat.
  */
 @Component({
   selector: 'app-agent-page',
@@ -105,6 +107,7 @@ export class AgentPage {
   private readonly agentsApi = inject(WorkspaceAgentsApi);
   private readonly worktrees = inject(AgentWorktreesApi);
   private readonly daemon = inject(WorkspaceDaemonApi);
+  private readonly commands = inject(WorkspaceCommands);
   private readonly events = inject(WorkspaceEvents);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
@@ -155,6 +158,8 @@ export class AgentPage {
         } else {
           this.events.close();
         }
+        // The shared command list, which the Chat and Terminal tabs read too: no extra request.
+        this.commands.use(rowId);
       });
     });
 
@@ -272,9 +277,18 @@ export class AgentPage {
     return [agentLabel(agent), agent.entityTitle].filter(Boolean).join(': ') || null;
   });
 
+  /** Chat for an agent whose harness is a chat; Terminal otherwise, the default way agents run. */
+  private readonly defaultTab = computed(() => {
+    const id = this.commandId();
+    const state = this.commands.commands();
+    const harness =
+      id && state.kind === 'ready' ? state.value.find((command) => command.id === id) : undefined;
+    return harness?.kind === 'CHAT' ? 'chat' : 'terminal';
+  });
+
   protected readonly urlTab = computed(() => {
     const slug = this.query().get('tab');
-    return isDurableTab(slug) ? slug! : DEFAULT_TAB;
+    return isDurableTab(slug) ? slug! : this.defaultTab();
   });
 
   /** The tab row, with a dot on Chat while the agent works or waits on you. */

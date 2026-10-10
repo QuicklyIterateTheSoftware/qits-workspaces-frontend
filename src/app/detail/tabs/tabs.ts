@@ -46,9 +46,6 @@ export const DURABLE_TABS: readonly TabDef[] = [
   { slug: 'terminal', label: 'Terminal', inUrl: true },
 ];
 
-/** The default selection: the first durable tab. A bare URL means "no tab pinned", not "chat". */
-export const DEFAULT_TAB = DURABLE_TABS[0].slug;
-
 /** Whether a slug names a durable tab. An unknown slug in the URL is normalised away, not obeyed. */
 export function isDurableTab(slug: string | null): boolean {
   return DURABLE_TABS.some((tab) => tab.slug === slug);

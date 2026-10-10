@@ -64,6 +64,20 @@ const agent = (over: Partial<AgentDto> = {}): AgentDto => ({
   ...over,
 });
 
+/** The agent's harness, running as a chat. */
+const COMMAND = {
+  id: 'cmd-1',
+  repoId: 'r',
+  workspaceId: 'w',
+  branch: 'b',
+  actionName: 'claude',
+  status: 'RUNNING',
+  interactive: false,
+  kind: 'CHAT',
+  launchedAt: 'T',
+  agentSessions: [],
+};
+
 const WORKTREE = {
   agentId: 'a1',
   path: '/workspace/agents/a1/qits-qits',
@@ -129,7 +143,10 @@ describe('AgentPage', () => {
     return element().textContent ?? '';
   }
 
-  /** Answer whatever the Chat tab asked: the command list and the draft. */
+  /**
+   * Answer whatever the open tab asked: the command list, then the Chat tab's draft or the Terminal
+   * tab's harness report, plugin store and detection.
+   */
   async function answerChat(commands: readonly unknown[] = []): Promise<void> {
     for (const request of http.match((candidate) => candidate.url.endsWith('/commands'))) {
       request.flush({ entries: commands.map((command) => ({ command })) });
@@ -137,6 +154,16 @@ describe('AgentPage', () => {
     await settle();
     for (const request of http.match((candidate) => candidate.url.endsWith('/prompt-draft'))) {
       request.flush({ message: 'none' }, { status: 404, statusText: 'Not Found' });
+    }
+    for (const request of http.match((candidate) => candidate.url.endsWith('/agents/available'))) {
+      request.flush({ agents: ['CLAUDE'], defaultAgent: 'CLAUDE', capabilities: [] });
+    }
+    await settle();
+    for (const request of http.match((candidate) => candidate.url.endsWith('/agent-plugins'))) {
+      request.flush({ installed: [] });
+    }
+    for (const request of http.match((candidate) => candidate.url.endsWith('/detection'))) {
+      request.flush({ projects: [], frameworks: [], links: [], generation: 'g' });
     }
     await settle();
   }
@@ -196,6 +223,30 @@ describe('AgentPage', () => {
     expect(labels).toEqual([expect.stringMatching(/^Chat/), 'Files', 'Terminal']);
   });
 
+  it('opens on the Terminal tab, the live screen of an agent in a terminal', async () => {
+    await harness.navigateByUrl('/agents/a1');
+    http.expectOne('/workspaces/api/agents/a1').flush(agent());
+    http.expectOne((request) => request.url === '/workspaces/api/agents/a1/waits').flush([]);
+    await settle();
+    http.expectOne('/workspaces/container/7/agent-worktrees/a1').flush(WORKTREE);
+    await settle();
+    await answerChat([{ ...COMMAND, kind: 'TERMINAL', interactive: true }]);
+
+    expect(element().querySelector('.strip .tab.active')?.textContent).toContain('Terminal');
+  });
+
+  it('opens on the Chat tab when the agent’s harness is a chat', async () => {
+    await harness.navigateByUrl('/agents/a1');
+    http.expectOne('/workspaces/api/agents/a1').flush(agent());
+    http.expectOne((request) => request.url === '/workspaces/api/agents/a1/waits').flush([]);
+    await settle();
+    http.expectOne('/workspaces/container/7/agent-worktrees/a1').flush(WORKTREE);
+    await settle();
+    await answerChat([COMMAND]);
+
+    expect(element().querySelector('.strip .tab.active')?.textContent).toContain('Chat');
+  });
+
   it('shows what the agent waits on, when the service says (qits-1153)', async () => {
     await open(agent({ activity: 'WAITING' }), {
       waits: [{ id: 'w1', agentId: 'a1', label: 'release of qits-617', state: 'OPEN' }],
@@ -210,20 +261,7 @@ describe('AgentPage', () => {
     await settle();
     http.expectOne('/workspaces/container/7/agent-worktrees/a1').flush(WORKTREE);
     await settle();
-    await answerChat([
-      {
-        id: 'cmd-1',
-        repoId: 'r',
-        workspaceId: 'w',
-        branch: 'b',
-        actionName: 'claude',
-        status: 'RUNNING',
-        interactive: false,
-        kind: 'CHAT',
-        launchedAt: 'T',
-        agentSessions: [],
-      },
-    ]);
+    await answerChat([COMMAND]);
 
     expect(sockets.map((socket) => socket.url)).toEqual([
       expect.stringContaining('/workspaces/container/7/chat/commands/cmd-1'),

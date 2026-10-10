@@ -20,16 +20,19 @@ removes workspaces as agents need them.
   history record and archived agent sessions.
 - **`/agents/{agentId}?tab=chat|files|terminal`** — one agent: its work item (linked into
   qits-projects), state, run state, activity, open waits ("Waiting on …", qits-1153, shown when the
-  service has them), branches, the worktree's dirty and unpushed flags, and **Discard**. Three tabs:
-  - **Chat** — attaches to the agent's harness command when it is a running chat. Otherwise the
-    prompt panel sends the turn through `POST /workspaces/api/agent-dispatches/delivery`, which
-    resumes a yielded agent to hear it. The prompt draft is the agent's
-    (`/workspaces/api/agents/{id}/prompt-draft`).
+  service has them), branches, the worktree's dirty and unpushed flags, and **Discard**. Three tabs;
+  with no `?tab`, Terminal, unless the agent's harness is a chat:
+  - **Chat** — attaches to the agent's harness command when it is a running chat. An agent in a
+    terminal (the default) shows its transcript here, read-only, from
+    `GET …/commands/{id}/log?channel=TRANSCRIPT`, read again every 3 s while it runs. Otherwise, and beside that
+    transcript, the prompt panel sends the turn through
+    `POST /workspaces/api/agent-dispatches/delivery`, which resumes a yielded agent to hear it.
+    The prompt draft is the agent's (`/workspaces/api/agents/{id}/prompt-draft`).
   - **Files** — the agent's worktree (`…/agent-worktrees/{agentId}/files`, `/files/content`,
     `/detection`).
-  - **Terminal** — the agent's harness when it runs interactive, the sign-in terminal when nobody
-    has signed the harness in (read from `GET /agents/available` → `capabilities`), and the plugin
-    store.
+  - **Terminal** — the agent's harness and its live screen when it runs interactive (the default),
+    the sign-in terminal when nobody has signed the harness in (read from `GET /agents/available` →
+    `capabilities`), and the plugin store.
 - **`/runners`** — the workspace runners.
 
 Every page also answers under a **scoped** address — `/<projectSlug>/<group>/<repoName>/…` — the
