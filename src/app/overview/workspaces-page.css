@@ -49,7 +49,7 @@ h2 {
 }
 form {
   display: grid;
-  grid-template-columns: minmax(14rem, 1fr) minmax(14rem, 1fr) auto;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
   gap: 1rem;
   align-items: end;
 }
@@ -61,6 +61,7 @@ label {
 }
 input,
 select,
+textarea,
 button {
   min-height: 2.65rem;
   border: 1px solid #3a4a5a;
@@ -69,7 +70,8 @@ button {
   font: inherit;
 }
 input,
-select {
+select,
+textarea {
   color: inherit;
   background: #0b1219;
 }
@@ -83,24 +85,13 @@ button:disabled {
   cursor: wait;
   opacity: 0.55;
 }
-/*
- * The admin-mode opt-in gets its own row under the two fields, with the submit button staying where
- * it was: a checkbox dropped into the three-column flow would take the button's cell and push it
- * onto a line of its own. Explicit placement rather than DOM order, so the option is read before
- * the button it changes while the button keeps its place beside the fields.
- */
+/* The admin-mode opt-in, the instruction and the button each take a full row. */
 .checkbox {
   display: flex;
   grid-column: 1 / -1;
-  grid-row: 2;
   gap: 0.6rem;
   align-items: flex-start;
   line-height: 1.4;
-}
-/* The second option ("Place on a runner") takes the next row: two labels on the same explicit row
- * would stack on top of each other, one hiding the other. */
-.checkbox ~ .checkbox {
-  grid-row: 3;
 }
 .checkbox input {
   min-height: 0;
@@ -117,8 +108,19 @@ button:disabled {
   font-size: 0.78rem;
 }
 form > button {
-  grid-column: 3;
-  grid-row: 1;
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+/* The instruction spans the form under the fields; the checkbox and the button follow it. */
+.wide {
+  grid-column: 1 / -1;
+}
+textarea {
+  padding: 0.5rem 0.75rem;
+  resize: vertical;
+}
+.slots {
+  margin-top: 2.5rem;
 }
 .admin-badge {
   align-self: center;
@@ -175,9 +177,8 @@ li span {
   form {
     grid-template-columns: 1fr;
   }
-  /* One column: the placement above would put the button back on the checkbox's row. */
   .checkbox,
-  .checkbox ~ .checkbox,
+  .wide,
   form > button {
     grid-column: auto;
     grid-row: auto;
@@ -187,14 +188,16 @@ li span {
   }
 }
 
-/* What a dispatched row is for. Outside the row's own anchor — a link inside a link is not HTML. */
+/* What an agent works on. Outside the row's own anchor — a link inside a link is not HTML. */
 .subject {
+  display: flex;
+  gap: 0.75rem;
   margin: 0.15rem 0 0;
   font-size: 0.85rem;
 }
 
 .subject a {
-  color: #1d4ed8;
+  color: #8ec5f0;
 }
 
 .subject span {

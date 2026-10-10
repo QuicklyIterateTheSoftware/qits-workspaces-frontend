@@ -15,7 +15,7 @@ const settle = async () => {
   selector: 'app-plugins-host',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PluginsSection],
-  template: `<app-plugins-section [workspaceRowId]="id()" />`,
+  template: `<app-plugins-section [workspaceRowId]="id()" agentId="a1" />`,
 })
 class PluginsHost {
   readonly id = signal(7);
@@ -59,48 +59,57 @@ describe('PluginsSection', () => {
     await open();
     // The detection entry is empty and this section does ask for one — exactly one, and only
     // because nothing else has. The Files panel's read is what normally fills it.
-    http.expectOne('/workspaces/container/7/detection').flush({
+    http.expectOne('/workspaces/container/7/agent-worktrees/a1/detection').flush({
       projects: [],
       frameworks: [],
       links: [],
       generation: 'g1',
     });
     await settle();
-    http.expectNone('/workspaces/container/7/detection');
+    http.expectNone('/workspaces/container/7/agent-worktrees/a1/detection');
   });
 
   it('takes a detection another panel already read rather than fetching one', async () => {
-    TestBed.inject(WorkspaceDetection).publish(7, {
-      projects: [{ root: 'webui', frameworkId: 'ts-angular', label: 'Angular' }],
-      frameworks: [],
-      links: [],
-      generation: 'g1',
-    });
+    TestBed.inject(WorkspaceDetection).publish(
+      { workspaceRowId: 7, agentId: 'a1' },
+      {
+        projects: [{ root: 'webui', frameworkId: 'ts-angular', label: 'Angular' }],
+        frameworks: [],
+        links: [],
+        generation: 'g1',
+      },
+    );
     await open();
-    http.expectNone('/workspaces/container/7/detection');
+    http.expectNone('/workspaces/container/7/agent-worktrees/a1/detection');
     expect(rows()[0].textContent).toContain('Recommended');
     expect(rows()[0].textContent).toContain('TypeScript');
   });
 
   it('floats a recommendation without hiding anything else', async () => {
-    TestBed.inject(WorkspaceDetection).publish(7, {
-      projects: [{ root: 'service', frameworkId: 'java-quarkus', label: 'Quarkus' }],
-      frameworks: [],
-      links: [],
-      generation: 'g1',
-    });
+    TestBed.inject(WorkspaceDetection).publish(
+      { workspaceRowId: 7, agentId: 'a1' },
+      {
+        projects: [{ root: 'service', frameworkId: 'java-quarkus', label: 'Quarkus' }],
+        frameworks: [],
+        links: [],
+        generation: 'g1',
+      },
+    );
     await open();
     expect(rows()[0].textContent).toContain('Java language server');
     expect(rows().length).toBeGreaterThan(1);
   });
 
   it('installs by the bare id and takes the refreshed set as the answer', async () => {
-    TestBed.inject(WorkspaceDetection).publish(7, {
-      projects: [],
-      frameworks: [],
-      links: [],
-      generation: 'g1',
-    });
+    TestBed.inject(WorkspaceDetection).publish(
+      { workspaceRowId: 7, agentId: 'a1' },
+      {
+        projects: [],
+        frameworks: [],
+        links: [],
+        generation: 'g1',
+      },
+    );
     await open();
     const button = rows()[0].querySelector<HTMLButtonElement>('button')!;
     button.click();
@@ -116,12 +125,15 @@ describe('PluginsSection', () => {
   });
 
   it('says an install failed in the daemon’s own words', async () => {
-    TestBed.inject(WorkspaceDetection).publish(7, {
-      projects: [],
-      frameworks: [],
-      links: [],
-      generation: 'g1',
-    });
+    TestBed.inject(WorkspaceDetection).publish(
+      { workspaceRowId: 7, agentId: 'a1' },
+      {
+        projects: [],
+        frameworks: [],
+        links: [],
+        generation: 'g1',
+      },
+    );
     await open();
     rows()[0].querySelector<HTMLButtonElement>('button')!.click();
     await settle();
@@ -135,24 +147,30 @@ describe('PluginsSection', () => {
   });
 
   it('lists an installed plugin it does not curate, rather than hiding it', async () => {
-    TestBed.inject(WorkspaceDetection).publish(7, {
-      projects: [],
-      frameworks: [],
-      links: [],
-      generation: 'g1',
-    });
+    TestBed.inject(WorkspaceDetection).publish(
+      { workspaceRowId: 7, agentId: 'a1' },
+      {
+        projects: [],
+        frameworks: [],
+        links: [],
+        generation: 'g1',
+      },
+    );
     await open([{ pluginId: 'something-else@claude-plugins-official', enabled: false }]);
     expect(text()).toContain('something-else@claude-plugins-official');
     expect(text()).toContain('switched off');
   });
 
   it('says the store is shared, because an install here changes every workspace', async () => {
-    TestBed.inject(WorkspaceDetection).publish(7, {
-      projects: [],
-      frameworks: [],
-      links: [],
-      generation: 'g1',
-    });
+    TestBed.inject(WorkspaceDetection).publish(
+      { workspaceRowId: 7, agentId: 'a1' },
+      {
+        projects: [],
+        frameworks: [],
+        links: [],
+        generation: 'g1',
+      },
+    );
     await open();
     expect(text()).toContain('shared agent home');
   });

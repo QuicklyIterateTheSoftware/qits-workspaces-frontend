@@ -12,6 +12,7 @@ import { FileViewer, type LineRange, type PickedRange } from './file-viewer';
   template: `
     <app-file-viewer
       [workspaceRowId]="7"
+      agentId="a1"
       [path]="path()"
       [visible]="visible()"
       [picking]="picking()"
@@ -60,7 +61,9 @@ describe('FileViewer', () => {
 
   function answer(body: Record<string, unknown>): void {
     http
-      .expectOne((request) => request.url === '/workspaces/container/7/files/content')
+      .expectOne(
+        (request) => request.url === '/workspaces/container/7/agent-worktrees/a1/files/content',
+      )
       .flush(body);
   }
 

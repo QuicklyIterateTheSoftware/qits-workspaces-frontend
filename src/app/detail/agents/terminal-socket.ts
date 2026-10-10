@@ -87,7 +87,7 @@ export class TerminalSocket {
    * Detach for good.
    *
    * The process keeps running; this is called when the panel is destroyed or the command changes,
-   * never when the tab is merely hidden — the Agents tab is one of the three surfaces that keep
+   * never when the tab is merely hidden — the Terminal tab is one of the surfaces that keep
    * working out of sight.
    */
   close(): void {

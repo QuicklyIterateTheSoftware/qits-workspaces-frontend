@@ -1,0 +1,195 @@
+@for (key of mountKey(); track key) {
+  <app-async
+    [state]="agentState()"
+    loadingLabel="Loading the agent"
+    errorLabel="Could not load the agent"
+    (retry)="reload()"
+  />
+
+  @if (agent(); as current) {
+    <header class="head">
+      <h1>
+        {{ label() }}
+        @if (current.entityTitle) {
+          <span class="title">{{ current.entityTitle }}</span>
+        }
+      </h1>
+      <p class="facts">
+        <qits-badge [label]="current.state.toLowerCase()" [tone]="stateTone()" />
+        <span>{{ runState() }}</span>
+        @if (activity(); as doing) {
+          <span class="sep">·</span>
+          <span>{{ doing }}</span>
+        }
+        @if (current.entityStatus) {
+          <span class="sep">·</span>
+          <span>item {{ current.entityStatus.toLowerCase() }}</span>
+        }
+        @if (current.entityBlocked) {
+          <qits-badge label="blocked" tone="warning" />
+        }
+        @if (current.admin) {
+          <qits-badge label="docker socket" tone="warning" />
+        }
+        @if (current.harness) {
+          <span class="sep">·</span>
+          <span>{{ current.harness.toLowerCase() }}</span>
+        }
+      </p>
+
+      @for (wait of waitLabels(); track $index) {
+        <p class="waiting" role="status">Waiting on {{ wait }}</p>
+      }
+
+      <p class="links">
+        @if (workItemHref(); as href) {
+          <a [href]="href">Open {{ label() }} in Projects</a>
+        }
+        @if (workspaceRoute(); as route) {
+          <a [routerLink]="route">Workspace ws-{{ current.workspaceRowId }}</a>
+        } @else if (!removed()) {
+          <span class="muted">No workspace yet — waits for a free slot.</span>
+        }
+      </p>
+
+      <section class="branches" aria-label="Branches">
+        <span class="key">Branches</span>
+        <code>{{ current.wrapperBranch }}</code>
+        @for (branch of current.branches; track branch.repositoryId + branch.branch) {
+          @if (branch.branch !== current.wrapperBranch) {
+            <code>{{ branch.branch }}</code>
+          }
+        }
+        @if (worktreeValue(); as tree) {
+          @if (tree.dirty) {
+            <qits-badge label="uncommitted changes" tone="warning" />
+          }
+          @if (tree.unpushed) {
+            <qits-badge label="unpushed commits" tone="warning" />
+          }
+        }
+      </section>
+
+      @if (!removed()) {
+        <div class="discard">
+          @switch (discardStep()) {
+            @case ('closed') {
+              <qits-button variant="ghost" size="sm" (pressed)="openDiscard()">
+                Discard…
+              </qits-button>
+            }
+            @case ('confirm') {
+              <p class="say">
+                Discard this agent? Its worktrees, its credential and its draft are removed. Pushed
+                branches stay on the git host.
+              </p>
+              <span class="verbs">
+                <qits-button variant="primary" size="sm" [busy]="discarding()" (pressed)="discard()"
+                  >Discard the agent</qits-button
+                >
+                <qits-button
+                  variant="ghost"
+                  size="sm"
+                  [disabled]="discarding()"
+                  (pressed)="cancelDiscard()"
+                  >Cancel</qits-button
+                >
+              </span>
+            }
+            @case ('force') {
+              <div class="fault" role="alert">
+                @if (refusal()?.code === 'AGENT_DAEMON_UNREACHABLE') {
+                  <p>
+                    The workspace's daemon does not answer, so nobody can check the agent for
+                    unpushed work. Discarding anyway can lose work that exists only in its worktree.
+                  </p>
+                } @else {
+                  <p>The agent has work that is not pushed. Discarding anyway loses it for good.</p>
+                }
+                <p class="said">{{ refusal()?.message }}</p>
+              </div>
+              <span class="verbs">
+                <qits-button
+                  variant="primary"
+                  size="sm"
+                  [busy]="discarding()"
+                  (pressed)="discard(true)"
+                  >Discard anyway — lose the work</qits-button
+                >
+                <qits-button
+                  variant="ghost"
+                  size="sm"
+                  [disabled]="discarding()"
+                  (pressed)="cancelDiscard()"
+                  >Keep the agent</qits-button
+                >
+              </span>
+            }
+          }
+          @if (discardProblem(); as problem) {
+            <p class="fault" role="alert">{{ problem }}</p>
+          }
+        </div>
+      }
+
+      @if (reachability() === 'unreachable') {
+        <p class="fault" role="alert">
+          The workspace's daemon is not connected. Files, the terminal and the live chat cannot work
+          right now. It usually comes back on its own.
+        </p>
+      }
+      @if (workspaceRowId() > 0 && !live()) {
+        <p class="stale">
+          Live updates are reconnecting — what is on screen may be a little behind.
+        </p>
+      }
+    </header>
+
+    @if (removed()) {
+      <p class="explain">
+        This agent is removed: its worktree and credential are gone. Its pushed branches, if any,
+        are listed above.
+      </p>
+    } @else {
+      <app-tab-host
+        [tabs]="tabs()"
+        [selected]="urlTab()"
+        label="Agent"
+        (selectTab)="chooseTab($event)"
+      >
+        @for (tab of durableTabs; track tab.slug) {
+          <ng-template [appTabPanel]="tab.slug">
+            @if (tab.slug === 'chat') {
+              <app-chat-panel
+                [workspaceRowId]="workspaceRowId()"
+                [agentId]="current.agentId"
+                [workId]="current.workId"
+                [commandId]="commandId()"
+                [preamble]="preamble()"
+              />
+            } @else if (tab.slug === 'files') {
+              @if (workspaceRowId() > 0) {
+                <app-files-panel
+                  [workspaceRowId]="workspaceRowId()"
+                  [agentId]="current.agentId"
+                  [visible]="urlTab() === 'files'"
+                />
+              } @else {
+                <p class="explain">
+                  The agent is queued and has no worktree yet, so there are no files to show.
+                </p>
+              }
+            } @else if (tab.slug === 'terminal') {
+              <app-terminal-panel
+                [workspaceRowId]="workspaceRowId()"
+                [agentId]="current.agentId"
+                [commandId]="commandId()"
+                [harness]="current.harness ?? null"
+              />
+            }
+          </ng-template>
+        }
+      </app-tab-host>
+    }
+  }
+}

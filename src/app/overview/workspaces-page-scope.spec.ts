@@ -108,6 +108,7 @@ describe('WorkspacesPage in scope', () => {
     const component = await open();
 
     http.expectOne('/workspaces/api/workspaces?repositoryId=qits-ci').flush({ entries: [] });
+    http.expectOne('/workspaces/api/agents').flush({ agents: [] });
     await settle(component);
 
     expect(html(component).querySelector('select[name="project"]')).toBeNull();
@@ -120,6 +121,7 @@ describe('WorkspacesPage in scope', () => {
     const component = await open();
 
     http.expectOne('/workspaces/api/workspaces?repositoryId=qits-qits').flush({ entries: [] });
+    http.expectOne('/workspaces/api/agents').flush({ agents: [] });
     await settle(component);
 
     expect(html(component).querySelector('select[name="project"]')).toBeNull();
@@ -132,6 +134,7 @@ describe('WorkspacesPage in scope', () => {
 
     // Unscoped, the page falls back to its own first admitted wrapper.
     http.expectOne('/workspaces/api/workspaces?repositoryId=qits-qits').flush({ entries: [] });
+    http.expectOne('/workspaces/api/agents').flush({ agents: [] });
     await settle(component);
 
     expect(html(component).querySelector('select[name="project"]')).not.toBeNull();

@@ -46,11 +46,10 @@ const workspace = (over: Partial<WorkspaceDto> = {}): WorkspaceDto => ({
 describe('StatusStrip', () => {
   const render = async (
     over: Partial<WorkspaceDto> = {},
-    options: { mainBranch?: string; reachability?: DaemonReachability } = {},
+    options: { reachability?: DaemonReachability } = {},
   ) => {
     const fixture = TestBed.createComponent(StatusStrip);
     fixture.componentRef.setInput('workspace', workspace(over));
-    fixture.componentRef.setInput('mainBranch', options.mainBranch ?? 'main');
     fixture.componentRef.setInput('reachability', options.reachability ?? 'unknown');
     await fixture.whenStable();
     fixture.detectChanges();
@@ -94,12 +93,6 @@ describe('StatusStrip', () => {
     expect(text(fixture)).toContain('Nothing is reporting one here');
   });
 
-  it('draws unknown cleanliness as unknown rather than as clean', async () => {
-    const fixture = await render({ clean: null });
-
-    expect(text(fixture)).toContain('working tree unknown');
-  });
-
   it('says the daemon is gone when a running container reports no connection', async () => {
     const fixture = await render({ runtimeStatus: 'RUNNING', daemonConnectedAt: null });
 
@@ -124,20 +117,6 @@ describe('StatusStrip', () => {
 
     expect(text(fixture)).toContain('outdated');
     expect(text(fixture)).toContain('Recreating the container is the way to replace it');
-  });
-
-  it('offers integrate for work parented anywhere but the default branch', async () => {
-    const fixture = await render({ parent: 'epic/widgets' }, { mainBranch: 'main' });
-
-    expect(text(fixture)).toContain('Integrate');
-  });
-
-  /** The default branch is written by a release request in qits-projects, and by nothing here. */
-  it('offers no door at all for work parented on the default branch', async () => {
-    const fixture = await render({ parent: 'main' }, { mainBranch: 'main' });
-
-    expect(text(fixture)).not.toContain('Integrate');
-    expect(text(fixture)).toContain('release request');
   });
 
   it('shows the runtime error the list used to keep to itself', async () => {
@@ -179,85 +158,14 @@ describe('StatusStrip', () => {
     expect(text(fixture)).toContain('That did not work');
   });
 
-  const press = async (fixture: Awaited<ReturnType<typeof render>>, label: string) => {
-    const button = Array.from(fixture.nativeElement.querySelectorAll('button')).find(
-      (candidate: unknown) => (candidate as HTMLButtonElement).textContent?.trim() === label,
-    ) as HTMLButtonElement;
-    expect(button, `a button labelled "${label}"`).toBeTruthy();
-    button.click();
-    await fixture.whenStable();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    fixture.detectChanges();
-  };
-
-  it('escalates to the ignore-changes confirmation only after the guard refuses', async () => {
-    const fixture = await render({ clean: false });
-    await press(fixture, 'Discard…');
-    await press(fixture, 'Discard this workspace');
-
-    // The first request must be incapable of losing work: no override parameter, ever.
-    TestBed.inject(HttpTestingController)
-      .expectOne('/workspaces/api/workspaces/7/discard')
-      .flush(
-        { message: "Cannot abandon workspace 'task-widgets': it has uncommitted changes." },
-        { status: 400, statusText: 'Bad Request' },
-      );
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    fixture.detectChanges();
-
-    // The refusal becomes the second confirmation, not an error message.
-    expect(text(fixture)).toContain('no way back');
-    expect(text(fixture)).not.toContain('That did not work');
-
-    await press(fixture, 'Discard anyway — lose the changes');
-    TestBed.inject(HttpTestingController)
-      .expectOne('/workspaces/api/workspaces/7/discard?ignore-changes=true')
-      .flush({ success: true });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    fixture.detectChanges();
-
-    expect(text(fixture)).not.toContain('no way back');
-  });
-
-  it('keeps every other discard failure an ordinary failure', async () => {
+  it('offers no integrate and no discard: a slot has no branch, and empties itself', async () => {
     const fixture = await render();
-    await press(fixture, 'Discard…');
-    await press(fixture, 'Discard this workspace');
 
-    TestBed.inject(HttpTestingController)
-      .expectOne('/workspaces/api/workspaces/7/discard')
-      .flush({ message: 'the git host is unreachable' }, { status: 500, statusText: 'Server Error' });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    fixture.detectChanges();
-
-    expect(text(fixture)).toContain('That did not work');
-    expect(text(fixture)).not.toContain('Discard anyway');
+    expect(text(fixture)).not.toContain('Integrate');
+    expect(text(fixture)).not.toContain('Discard');
+    expect(text(fixture)).not.toContain('Working tree');
   });
 
-  it('leaves the escalation behind when the confirmation is declined', async () => {
-    const fixture = await render({ clean: false });
-    await press(fixture, 'Discard…');
-    await press(fixture, 'Discard this workspace');
-    TestBed.inject(HttpTestingController)
-      .expectOne('/workspaces/api/workspaces/7/discard')
-      .flush(
-        { message: 'it has uncommitted changes' },
-        { status: 400, statusText: 'Bad Request' },
-      );
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    fixture.detectChanges();
-
-    await press(fixture, 'Keep the workspace');
-
-    expect(text(fixture)).not.toContain('no way back');
-    // Declining drops back to the plain form (the note survives), and the next attempt is plain
-    // again: declining must not leave the override armed.
-    await press(fixture, 'Discard this workspace');
-    TestBed.inject(HttpTestingController)
-      .expectOne('/workspaces/api/workspaces/7/discard')
-      .flush({ success: true });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
   describe('a runner-placed workspace', () => {
     const verb = (fixture: { nativeElement: HTMLElement }, label: string): HTMLButtonElement =>
       Array.from(fixture.nativeElement.querySelectorAll('button')).find(
@@ -373,7 +281,9 @@ describe('StatusStrip', () => {
         { reachability: 'unreachable' },
       );
 
-      expect(text(fixture)).toContain('Files, terminals and the agent surface cannot work right now');
+      expect(text(fixture)).toContain(
+        'Files, terminals and the agent surface cannot work right now',
+      );
     });
 
     it('keeps UNAVAILABLE without a connected daemon reading as not-running, unchanged', async () => {

@@ -6,13 +6,13 @@
       <a class="runners-link" [routerLink]="[...home(), 'runners']">Runners</a>
     </div>
     <p class="intro">
-      Create a disposable checkout of a project with one branch shared by its wrapper repository and
-      every submodule under it.
+      An agent works on one ticket or epic in its own worktree of the project's wrapper. Workspaces
+      are the slots agents run in; the platform makes and removes them as agents need them.
     </p>
   </header>
 
   <section class="create" aria-labelledby="create-title">
-    <h2 id="create-title">New workspace</h2>
+    <h2 id="create-title">New agent</h2>
     <form (ngSubmit)="create()">
       @if (!scoped()) {
         <label>
@@ -32,37 +32,91 @@
         </label>
       }
       <label>
-        Workspace branch
-        <input name="branch" [(ngModel)]="branch" required maxlength="120" autocomplete="off" />
+        Work item
+        <input
+          name="workItem"
+          [(ngModel)]="workItem"
+          required
+          maxlength="80"
+          autocomplete="off"
+          placeholder="qits-617"
+        />
+      </label>
+      <label>
+        Harness
+        <select name="harness" [(ngModel)]="harness">
+          <option value="">Default</option>
+          @for (option of harnesses; track option) {
+            <option [value]="option">{{ option.toLowerCase() }}</option>
+          }
+        </select>
+      </label>
+      <label class="wide">
+        First instruction (optional)
+        <textarea name="instruction" rows="3" [(ngModel)]="instruction"></textarea>
       </label>
       <label class="checkbox">
         <input type="checkbox" name="admin" [(ngModel)]="admin" />
         <span>
           Enable docker socket
           <small>
-            Admin mode: the container can drive the host's docker daemon, which makes it
-            root-equivalent on the host. Only for administrative work.
+            Admin mode: the agent runs in a workspace that can drive the host's docker daemon, which
+            makes it root-equivalent on the host. Only for administrative work.
           </small>
         </span>
       </label>
-      <button type="submit" [disabled]="creating() || !selectedRepositoryId || !branch.trim()">
-        {{ creating() ? 'Creating…' : 'Create workspace' }}
+      <button type="submit" [disabled]="creating() || !selectedRepositoryId || !workItem.trim()">
+        {{ creating() ? 'Creating…' : 'Create agent' }}
       </button>
     </form>
     <p class="hint">
-      Creates the branch tree, starts a container, and clones each matching submodule branch.
+      Takes a ticket or an epic by its id or UUID. An item that already has an agent opens that
+      agent.
     </p>
     @if (error()) {
       <p class="error" role="alert">{{ error() }}</p>
     }
   </section>
 
-  <section aria-labelledby="existing-title">
-    <h2 id="existing-title">Existing workspaces</h2>
+  <section aria-labelledby="agents-title">
+    <h2 id="agents-title">Agents</h2>
+    @if (loading()) {
+      <p class="muted">Loading…</p>
+    } @else if (!agents().length) {
+      <p class="muted">No agents yet.</p>
+    } @else {
+      <ul>
+        @for (agent of agents(); track agent.agentId) {
+          <li>
+            <a [routerLink]="[...home(), 'agents', agent.agentId]">
+              <strong>{{ labelOf(agent) }}</strong>
+              @if (agent.admin) {
+                <span class="admin-badge" title="Admin mode: runs with the host's docker socket">
+                  docker socket
+                </span>
+              }
+              <span>{{ agent.state.toLowerCase() }} · {{ runStateOf(agent) }}</span>
+            </a>
+            <p class="subject">
+              @if (agent.entityTitle) {
+                <span>{{ agent.entityTitle }}</span>
+              }
+              @if (workItemHrefOf(agent); as href) {
+                <a [href]="href">Open in Projects</a>
+              }
+            </p>
+          </li>
+        }
+      </ul>
+    }
+  </section>
+
+  <section class="slots" aria-labelledby="existing-title">
+    <h2 id="existing-title">Workspaces</h2>
     @if (loading()) {
       <p class="muted">Loading…</p>
     } @else if (!workspaces().length) {
-      <p class="muted">No active workspaces yet.</p>
+      <p class="muted">No workspaces right now.</p>
     } @else {
       <ul>
         @for (workspace of workspaces(); track workspace.id) {
@@ -76,7 +130,7 @@
                 workspace.id,
               ]"
             >
-              <strong>{{ workspace.branch || workspace.workspaceId }}</strong>
+              <strong>{{ workspace.workspaceId }}</strong>
               @if (workspace.admin) {
                 <span
                   class="admin-badge"
@@ -90,17 +144,11 @@
                   {{ workspace.runner ? 'on ' + workspace.runner.name : 'runner' }}
                 </span>
               }
-              <span>{{ workspace.runtimeStatus?.toLowerCase() ?? 'runtime unknown' }}</span>
+              <span
+                >{{ workspace.runtimeStatus?.toLowerCase() ?? 'runtime unknown' }} ·
+                {{ agentCount(workspace) }} agent{{ agentCount(workspace) === 1 ? '' : 's' }}</span
+              >
             </a>
-            @if (subjectOf(workspace); as ref) {
-              <p class="subject">
-                @if (subjectHrefOf(ref); as href) {
-                  <a [href]="href">{{ labelOf(ref) }}</a>
-                } @else {
-                  <span>{{ labelOf(ref) }}</span>
-                }
-              </p>
-            }
           </li>
         }
       </ul>

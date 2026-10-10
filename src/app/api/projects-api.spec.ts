@@ -138,4 +138,14 @@ describe('ProjectsApi', () => {
     await settle();
     http.expectOne('/projects/api/projects').flush({ entries: [] });
   });
+
+  it('reads one work item by qualified id, on qits-projects’ own origin', async () => {
+    answer({ 'qits-projects': { origin: PROJECTS_ORIGIN } });
+    const reading = api.workItem('qits-617');
+    await settle();
+    const request = http.expectOne(`${PROJECTS_ORIGIN}/projects/api/work/qits-617`);
+    expect(request.request.withCredentials).toBe(true);
+    request.flush({ id: 'uuid-1', archetype: 'TICKET', projectId: 'p1', qualifiedId: 'qits-617' });
+    await expect(reading).resolves.toMatchObject({ id: 'uuid-1', archetype: 'TICKET' });
+  });
 });

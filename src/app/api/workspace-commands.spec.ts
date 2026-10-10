@@ -101,34 +101,6 @@ describe('WorkspaceCommands', () => {
     await settle();
   });
 
-  it('finds the running chat, and ignores a terminal run and a finished chat', async () => {
-    store.use(7);
-    TestBed.tick();
-    http.expectOne('/workspaces/container/7/commands').flush({
-      entries: [
-        { command: command('newest', 'TERMINAL', 'RUNNING') },
-        { command: command('the-chat', 'CHAT', 'RUNNING') },
-        { command: command('older', 'CHAT', 'EXITED') },
-      ],
-    });
-    await settle();
-    TestBed.tick();
-
-    expect(store.runningChat()?.id).toBe('the-chat');
-  });
-
-  it('answers no running chat when nothing is running', async () => {
-    store.use(7);
-    TestBed.tick();
-    http
-      .expectOne('/workspaces/container/7/commands')
-      .flush({ entries: [{ command: command('done', 'CHAT', 'EXITED') }] });
-    await settle();
-    TestBed.tick();
-
-    expect(store.runningChat()).toBeNull();
-  });
-
   it('blanks the entry when the workspace under it changes', async () => {
     store.use(7);
     TestBed.tick();
@@ -137,12 +109,12 @@ describe('WorkspaceCommands', () => {
       .flush({ entries: [{ command: command('a', 'CHAT', 'RUNNING') }] });
     await settle();
     TestBed.tick();
-    expect(store.runningChat()?.id).toBe('a');
+    const first = store.commands();
+    expect(first.kind === 'ready' && first.value[0].id).toBe('a');
 
     // One workspace's runs are not a stale view of another's.
     store.use(8);
     expect(store.commands().kind).toBe('loading');
-    expect(store.runningChat()).toBeNull();
     TestBed.tick();
     http.expectOne('/workspaces/container/8/commands').flush({ entries: [] });
     await settle();

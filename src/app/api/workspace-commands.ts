@@ -6,20 +6,9 @@ import { WorkspaceEvents } from './workspace-events';
 /**
  * The one command-list entry, owned in one place.
  *
- * Four surfaces read this list — the Chat tab's "is a conversation live", the Actions run history,
- * the Agents session tree and the embedded session — and the rule that makes four readers affordable
- * is **identical key and identical result shape**, or they silently stop sharing. In a signals
- * codebase that means exactly this: one `@Injectable` owning one signal, injected everywhere, never
- * a second fetch against the same URL.
- *
- * **It owns its own freshness.** The `commands` hint fires when a command's lifecycle changes, and
- * the transcript sweep nudges it again on exit — so the refetch belongs here rather than in each
- * reader, where four readers would answer one hint with four identical requests.
- *
- * **It stays fresh while its tab is hidden**, unlike most panels. Chat is one of the three surfaces
- * that keep working out of sight, and this is why: a conversation started from the list, from the
- * Agents tab or from another device has to be noticed by the Chat tab that is not currently showing,
- * or coming back to it shows a prompt panel over a running agent.
+ * The Chat and Terminal tabs both read this list, each for its agent's own command; one signal and
+ * one fetch per container keeps them from asking twice. It refreshes itself on the `commands` hint,
+ * also while its tab is hidden, so a chat started or ended elsewhere is noticed.
  */
 @Injectable({ providedIn: 'root' })
 export class WorkspaceCommands {
@@ -63,23 +52,6 @@ export class WorkspaceCommands {
   async refresh(): Promise<void> {
     await this.load(this.workspaceRowId());
   }
-
-  /**
-   * The conversation that owns this workspace right now, or null.
-   *
-   * A chat is a command of kind `CHAT` that is still `RUNNING`. There is at most one that matters:
-   * a concurrent second one is the collision session-pinning exists to prevent, so the newest wins
-   * and the list is already newest-first.
-   */
-  readonly runningChat = computed<CommandDto | null>(() => {
-    const state = this.state();
-    if (state.kind !== 'ready') {
-      return null;
-    }
-    return (
-      state.value.find((command) => command.kind === 'CHAT' && command.status === 'RUNNING') ?? null
-    );
-  });
 
   /** Whether the list has been read at all. `idle` is not "nothing running", it is "not asked". */
   readonly asked = computed(() => this.state().kind !== 'idle');

@@ -5,7 +5,7 @@ import { provideLocationMocks } from '@angular/common/testing';
 import { provideQitsRepositoryList, provideQitsScope } from '@qits/ui-components';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
-import type { ProjectDto, RepositoryDto, WorkspaceDto } from '../api/dto';
+import type { AgentDto, ProjectDto, RepositoryDto, WorkspaceDto } from '../api/dto';
 import { routes } from '../app.routes';
 import { WorkspacesPage } from './workspaces-page';
 
@@ -29,11 +29,26 @@ const repository = (id: string, over: Partial<RepositoryDto> = {}): RepositoryDt
   ...over,
 });
 
+const agent = (agentId: string, over: Partial<AgentDto> = {}): AgentDto => ({
+  agentId,
+  workspaceRowId: 12,
+  repositoryId: 'qits-qits',
+  workId: `work-${agentId}`,
+  entityId: 'qits-617',
+  entityTitle: 'Fix the login',
+  wrapperBranch: 'ticket/qits-617',
+  branches: [],
+  state: 'ACTIVE',
+  runState: 'RUNNING',
+  admin: false,
+  ...over,
+});
+
 const workspace = (over: Partial<WorkspaceDto> = {}): WorkspaceDto => ({
   id: 12,
-  workspaceId: 'adhoc-changes',
-  parent: 'main',
-  branch: 'adhoc-changes',
+  workspaceId: 'ws-12',
+  parent: null,
+  branch: null,
   ahead: 0,
   behind: 0,
   conflictsWithParent: false,
@@ -67,24 +82,15 @@ const fixture = (
 ): ProjectFixture => ({ project: dto, repositories, wrapper });
 
 /**
- * The front door: what it offers to branch, and what one press actually sends.
+ * The front door: which wrapper it is about, the agents and workspaces it lists, and what one press
+ * of "Create agent" sends.
  *
- * **The picker admits each project's wrapper, and the service is what says which row that is.** An
- * aggregate workspace forks a wrapper and everything registered under it, so offering an ordinary
- * component repository would offer a create the service refuses. The rule is the `wrapper` view's
- * `repositoryId` and nothing else — not a name, not an archetype — so a second project's wrapper has
- * to appear beside the first's, and every other row of both has to stay out.
+ * **The picker admits each project's wrapper, and the service is what says which row that is.**
+ * `?repository=` preselects one; a stale id is ignored.
  *
- * **`?repository=` is the projects SPA's link, and a stale one must not break the page.** An id
- * naming an admitted wrapper is preselected; an id naming anything else is ignored.
- *
- * **`branchTree` is the flag the whole feature hangs on.** Without it qits-workspaces makes the
- * plain single-repository workspace it always made, on the wrapper alone — a create that looks
- * successful and leaves every submodule unbranched. So the payload is asserted field by field.
- *
- * **The container is started before the page navigates.** The detail view watches a starting
- * process; navigating first and starting after would leave the container unstarted whenever the
- * second request never went out.
+ * **An agent is created for an existing ticket or epic (D24).** The item is read from qits-projects
+ * first, so the request carries its UUID, its qualified id and its kind, and anything that is not a
+ * ticket or an epic of the wrapper's project is refused before a request goes out.
  */
 describe('WorkspacesPage', () => {
   let http: HttpTestingController;
@@ -93,6 +99,8 @@ describe('WorkspacesPage', () => {
   const repositoriesUrl = (projectId: string) => `/projects/api/projects/${projectId}/repositories`;
   const workspacesUrl = (repositoryId: string) =>
     `/workspaces/api/workspaces?repositoryId=${repositoryId}`;
+  const AGENTS_URL = '/workspaces/api/agents';
+  const workItemUrl = (ref: string) => `/projects/api/work/${ref}`;
 
   beforeEach(() => {
     TestBed.configureTestingModule({
@@ -131,6 +139,7 @@ describe('WorkspacesPage', () => {
     options: {
       projects?: readonly ProjectFixture[];
       workspaces?: readonly WorkspaceDto[];
+      agents?: readonly AgentDto[];
       url?: string;
     } = {},
   ): Promise<ComponentFixture<WorkspacesPage>> => {
@@ -163,6 +172,7 @@ describe('WorkspacesPage', () => {
       http
         .expectOne(workspacesUrl(selected))
         .flush({ entries: (options.workspaces ?? []).map((entry) => ({ workspace: entry })) });
+      http.expectOne(AGENTS_URL).flush({ agents: options.agents ?? [] });
       await settle(component);
     }
     return component;
@@ -185,6 +195,20 @@ describe('WorkspacesPage', () => {
   const options = (component: ComponentFixture<WorkspacesPage>): HTMLOptionElement[] =>
     Array.from((component.nativeElement as HTMLElement).querySelectorAll('option'));
 
+  const projectOptions = (component: ComponentFixture<WorkspacesPage>): HTMLOptionElement[] =>
+    Array.from(
+      (component.nativeElement as HTMLElement).querySelectorAll('select[name="project"] option'),
+    );
+
+  const typeWorkItem = async (component: ComponentFixture<WorkspacesPage>, ref: string) => {
+    const input = (component.nativeElement as HTMLElement).querySelector(
+      'input[name="workItem"]',
+    ) as HTMLInputElement;
+    input.value = ref;
+    input.dispatchEvent(new Event('input'));
+    await settle(component);
+  };
+
   const submit = async (component: ComponentFixture<WorkspacesPage>): Promise<void> => {
     (component.nativeElement as HTMLElement)
       .querySelector('form')
@@ -192,13 +216,25 @@ describe('WorkspacesPage', () => {
     await settle(component);
   };
 
-  it('offers the wrapper alone and lists the workspaces it already has', async () => {
-    const component = await open({ workspaces: [workspace({ branch: 'adhoc-changes' })] });
+  it('offers the wrapper alone and lists its workspaces and agents', async () => {
+    const component = await open({
+      workspaces: [workspace()],
+      agents: [agent('a1'), agent('a2', { repositoryId: 'other-wrapper', entityId: 'other-1' })],
+    });
 
-    expect(options(component)).toHaveLength(1);
-    expect(options(component)[0].textContent).toContain('qits-qits');
-    expect(text(component)).toContain('adhoc-changes');
+    const projectOptions = options(component).filter((option) =>
+      option.closest('select[name="project"]'),
+    );
+    expect(projectOptions).toHaveLength(1);
+    expect(projectOptions[0].textContent).toContain('qits-qits');
+    expect(text(component)).toContain('ws-12');
     expect(text(component)).toContain('running');
+    expect(text(component)).toContain('1 agent');
+    // Only this wrapper's agents.
+    expect(text(component)).toContain('qits-617');
+    expect(text(component)).not.toContain('other-1');
+    const link = (component.nativeElement as HTMLElement).querySelector('a[href="/agents/a1"]');
+    expect(link).not.toBeNull();
   });
 
   it('offers one wrapper per project, named after the project', async () => {
@@ -217,7 +253,7 @@ describe('WorkspacesPage', () => {
       ],
     });
 
-    const labels = options(component).map((option) => option.textContent?.trim());
+    const labels = projectOptions(component).map((option) => option.textContent?.trim());
     expect(labels).toHaveLength(2);
     expect(labels[0]).toContain('qits');
     expect(labels[0]).toContain('qits-qits');
@@ -237,8 +273,8 @@ describe('WorkspacesPage', () => {
       projects: [fixture(PROJECT, [repository('qits-ci'), repository('qits-qits')], 'qits-ci')],
     });
 
-    expect(options(component)).toHaveLength(1);
-    expect(options(component)[0].textContent).toContain('qits-ci');
+    expect(projectOptions(component)).toHaveLength(1);
+    expect(projectOptions(component)[0].textContent).toContain('qits-ci');
   });
 
   it('says a workspace with no runtime state is unknown rather than stopped', async () => {
@@ -255,8 +291,8 @@ describe('WorkspacesPage', () => {
 
     // No repository, no listing: qits-workspaces' listing takes a mandatory `repositoryId`, and
     // `http.verify()` in the teardown is what proves nothing was asked for anyway.
-    expect(text(component)).toContain('No active workspaces yet');
-    expect(options(component)).toHaveLength(0);
+    expect(text(component)).toContain('No workspaces right now');
+    expect(projectOptions(component)).toHaveLength(0);
   });
 
   /** Drift: the wrapper names a row this project has not got. There is nothing to branch. */
@@ -265,7 +301,7 @@ describe('WorkspacesPage', () => {
       projects: [fixture(PROJECT, [repository('qits-ci')], 'qits-qits')],
     });
 
-    expect(options(component)).toHaveLength(0);
+    expect(projectOptions(component)).toHaveLength(0);
   });
 
   it('preselects the wrapper the query parameter names', async () => {
@@ -276,14 +312,14 @@ describe('WorkspacesPage', () => {
         fixture(PROJECT, [repository('qits-qits')], 'qits-qits'),
         fixture(widgets, [repository('widgets-widgets', { projectId: 'p2' })], 'widgets-widgets'),
       ],
-      workspaces: [workspace({ branch: 'adhoc-changes' })],
+      workspaces: [workspace()],
     });
 
     const select = (component.nativeElement as HTMLElement).querySelector('select');
     expect(select?.value).toBe('widgets-widgets');
     // The list read is the proof it took: it is scoped by the selected repository, and `open`
     // answered `widgets-widgets`'s url alone.
-    expect(text(component)).toContain('adhoc-changes');
+    expect(text(component)).toContain('ws-12');
   });
 
   it('ignores a query parameter naming no admitted wrapper', async () => {
@@ -293,30 +329,101 @@ describe('WorkspacesPage', () => {
     expect(select?.value).toBe('qits-qits');
   });
 
-  it('creates the branch tree in one request, and then opens the workspace', async () => {
+  it('reads the work item, creates an agent for it, then opens the agent', async () => {
     const component = await open();
 
+    await typeWorkItem(component, 'qits-617');
     await submit(component);
 
-    const create = http.expectOne('/workspaces/api/workspaces');
+    http
+      .expectOne(workItemUrl('qits-617'))
+      .flush({ id: 'uuid-617', archetype: 'TICKET', projectId: 'p1', qualifiedId: 'qits-617' });
+    await settle(component);
+
+    const create = http.expectOne(AGENTS_URL);
+    expect(create.request.method).toBe('POST');
     expect(create.request.body).toEqual({
       repositoryId: 'qits-qits',
-      id: 'adhoc-changes',
-      parent: 'main',
-      branch: 'adhoc-changes',
-      preamble: '',
-      adoptExisting: false,
-      branchTree: true,
+      workId: 'uuid-617',
+      entityId: 'qits-617',
+      kind: 'TICKET',
       // Untouched checkbox, and the request says so rather than staying silent about it.
       admin: false,
     });
-    // The create starts the workspace too (qits-853) and answers the start's process beside it.
-    create.flush({ workspace: workspace(), technicalProcessId: 'p-1', startError: null });
+    create.flush({ agent: agent('a9'), fresh: true, agentLaunch: 'SCHEDULED' });
     await settle(component);
 
-    // No second call: the detail page finds the running start through its own active-process read.
-    http.expectNone('/workspaces/api/workspaces/12/ensure-container');
-    expect(TestBed.inject(Location).path()).toBe('/repositories/qits-qits/workspaces/12');
+    expect(TestBed.inject(Location).path()).toBe('/agents/a9');
+  });
+
+  it('sends the epic kind, the harness and the instruction when given', async () => {
+    const component = await open();
+    const root = component.nativeElement as HTMLElement;
+
+    await typeWorkItem(component, 'qits-600');
+    const harness = root.querySelector('select[name="harness"]') as HTMLSelectElement;
+    harness.value = harness.options[2].value;
+    harness.dispatchEvent(new Event('change'));
+    const instruction = root.querySelector('textarea[name="instruction"]') as HTMLTextAreaElement;
+    instruction.value = 'start with the tests';
+    instruction.dispatchEvent(new Event('input'));
+    await settle(component);
+    await submit(component);
+
+    http
+      .expectOne(workItemUrl('qits-600'))
+      .flush({ id: 'uuid-600', archetype: 'EPIC', projectId: 'p1', qualifiedId: 'qits-600' });
+    await settle(component);
+
+    const create = http.expectOne(AGENTS_URL);
+    expect(create.request.body).toMatchObject({
+      kind: 'EPIC',
+      harness: 'KIMI',
+      instruction: 'start with the tests',
+    });
+    create.flush({ agent: agent('a8'), fresh: false, agentLaunch: 'SKIPPED_RUNNING' });
+    await settle(component);
+  });
+
+  it('refuses a task: only a ticket or an epic gets an agent', async () => {
+    const component = await open();
+    await typeWorkItem(component, 'qits-700');
+    await submit(component);
+
+    http
+      .expectOne(workItemUrl('qits-700'))
+      .flush({ id: 'uuid-700', archetype: 'TASK', projectId: 'p1', qualifiedId: 'qits-700' });
+    await settle(component);
+
+    http.expectNone(AGENTS_URL);
+    expect(text(component)).toContain('Only a ticket or an epic gets an agent');
+  });
+
+  it('refuses a work item of another project', async () => {
+    const component = await open();
+    await typeWorkItem(component, 'other-1');
+    await submit(component);
+
+    http
+      .expectOne(workItemUrl('other-1'))
+      .flush({ id: 'uuid-1', archetype: 'TICKET', projectId: 'p2', qualifiedId: 'other-1' });
+    await settle(component);
+
+    http.expectNone(AGENTS_URL);
+    expect(text(component)).toContain('belongs to another project');
+  });
+
+  it('says plainly when there is no such work item', async () => {
+    const component = await open();
+    await typeWorkItem(component, 'qits-99999');
+    await submit(component);
+
+    http
+      .expectOne(workItemUrl('qits-99999'))
+      .flush({ message: 'no' }, { status: 404, statusText: 'Not Found' });
+    await settle(component);
+
+    expect(text(component)).toContain('There is no work item qits-99999');
   });
 
   it('asks for the docker socket only when the checkbox was ticked', async () => {
@@ -325,19 +432,20 @@ describe('WorkspacesPage', () => {
     const checkbox = (component.nativeElement as HTMLElement).querySelector(
       'input[name="admin"]',
     ) as HTMLInputElement;
-    // The default is the whole claim: a workspace is ordinary unless somebody said otherwise, and
-    // the container of an ordinary workspace holds no socket.
     expect(checkbox.checked).toBe(false);
 
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event('change'));
-    await settle(component);
-
+    await typeWorkItem(component, 'qits-617');
     await submit(component);
 
-    const create = http.expectOne('/workspaces/api/workspaces');
+    http
+      .expectOne(workItemUrl('qits-617'))
+      .flush({ id: 'uuid-617', archetype: 'TICKET', projectId: 'p1', qualifiedId: 'qits-617' });
+    await settle(component);
+    const create = http.expectOne(AGENTS_URL);
     expect((create.request.body as { admin: boolean }).admin).toBe(true);
-    create.flush({ workspace: workspace({ admin: true }) });
+    create.flush({ agent: agent('a9', { admin: true }), fresh: true, agentLaunch: 'SCHEDULED' });
     await settle(component);
   });
 
@@ -345,7 +453,7 @@ describe('WorkspacesPage', () => {
     // A privileged workspace has to be visible as one from the list. It is the only place somebody
     // scanning the platform would notice a socket granted for one afternoon and never given back.
     const component = await open({
-      workspaces: [workspace({ branch: 'admin-work', admin: true })],
+      workspaces: [workspace({ admin: true })],
     });
 
     // The badge, not the page text: the create form's own checkbox says "docker socket" too, so a
@@ -355,39 +463,45 @@ describe('WorkspacesPage', () => {
   });
 
   it('leaves the ordinary workspaces unmarked', async () => {
-    const component = await open({ workspaces: [workspace({ branch: 'ordinary' })] });
+    const component = await open({ workspaces: [workspace()] });
 
     expect((component.nativeElement as HTMLElement).querySelector('li .admin-badge')).toBeNull();
   });
 
   it('keeps the service’s own words when a create is refused, and re-reads the list', async () => {
     const component = await open();
-
+    await typeWorkItem(component, 'qits-617');
     await submit(component);
 
     http
-      .expectOne('/workspaces/api/workspaces')
+      .expectOne(workItemUrl('qits-617'))
+      .flush({ id: 'uuid-617', archetype: 'TICKET', projectId: 'p1', qualifiedId: 'qits-617' });
+    await settle(component);
+    http
+      .expectOne(AGENTS_URL)
       .flush(
-        { message: 'Branch already exists in qits-ci: adhoc-changes' },
-        { status: 409, statusText: 'Conflict' },
+        { message: 'No such repository: qits-qits' },
+        { status: 404, statusText: 'Not Found' },
       );
     await settle(component);
 
     http.expectOne(workspacesUrl('qits-qits')).flush({ entries: [] });
+    http.expectOne(AGENTS_URL).flush({ agents: [] });
     await settle(component);
 
-    expect(text(component)).toContain('Branch already exists in qits-ci: adhoc-changes');
+    expect(text(component)).toContain('No such repository: qits-qits');
     expect(TestBed.inject(Location).path()).toBe('');
   });
+
   it('marks a runner-placed row with its runner', async () => {
     const component = await open({
       workspaces: [
         workspace({ placement: 'RUNNER', runner: { id: 'r-1', name: 'node-a' } }),
-        workspace({ id: 13, branch: 'direct', placement: 'DIRECT', runner: null }),
+        workspace({ id: 13, workspaceId: 'ws-13', placement: 'DIRECT', runner: null }),
       ],
     });
 
-    const rows = (component.nativeElement as HTMLElement).querySelectorAll('li');
+    const rows = (component.nativeElement as HTMLElement).querySelectorAll('.slots li');
     expect(rows[0].querySelector('.runner-badge')?.textContent).toContain('on node-a');
     expect(rows[1].querySelector('.runner-badge')).toBeNull();
   });

@@ -8,9 +8,8 @@ import { Injectable, computed, signal } from '@angular/core';
  * the *consumer* is here: without it the picker would have nowhere to write and the rows nothing to
  * read.
  *
- * It is application-scoped and keyed by workspace, like the tab host it lives inside. {@link use}
- * clears it when the workspace under it changes, because a line range in one workspace's file means
- * nothing in another's.
+ * It is application-scoped and keyed by agent. {@link use} clears it when the agent changes, because
+ * a line range in one agent's worktree means nothing in another's.
  *
  * **The picks are work product, so they ride the prompt draft.** They are saved into the draft's
  * `content` blob and restored from it, which is why a chip survives a reload and why the schema of
@@ -46,7 +45,7 @@ export function referenceText(reference: CodeReference): string {
 
 @Injectable({ providedIn: 'root' })
 export class PickedContext {
-  private readonly workspaceRowId = signal(0);
+  private readonly agentId = signal('');
   private readonly refs = signal<readonly CodeReference[]>([]);
 
   readonly references = this.refs.asReadonly();
@@ -54,12 +53,12 @@ export class PickedContext {
   /** Whether anything has been picked. The rows are drawn only when there is something in them. */
   readonly any = computed(() => this.refs().length > 0);
 
-  /** Point at a workspace. A change empties the picks; the same id is a no-op. */
-  use(workspaceRowId: number): void {
-    if (this.workspaceRowId() === workspaceRowId) {
+  /** Point at an agent. A change empties the picks; the same id is a no-op. */
+  use(agentId: string): void {
+    if (this.agentId() === agentId) {
       return;
     }
-    this.workspaceRowId.set(workspaceRowId);
+    this.agentId.set(agentId);
     this.refs.set([]);
   }
 
@@ -128,7 +127,7 @@ export function serializePrompt(composition: DraftComposition): string {
     .filter((reference) => !composition.text.includes(referenceLabel(reference)))
     .map(referenceText);
   if (extras.length > 0) {
-    parts.push(`Context picked in the workspace:\n\n${extras.join('\n\n')}`);
+    parts.push(`Context picked in the worktree:\n\n${extras.join('\n\n')}`);
   }
   return parts.join('\n\n');
 }

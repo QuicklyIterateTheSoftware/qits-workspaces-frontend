@@ -1,9 +1,11 @@
-<app-async
-  [state]="commandsState()"
-  loadingLabel="Looking for a running conversation"
-  errorLabel="Could not reach the container"
-  (retry)="retry()"
-/>
+@if (workspaceRowId() > 0) {
+  <app-async
+    [state]="commandsState()"
+    loadingLabel="Looking for a running conversation"
+    errorLabel="Could not reach the container"
+    (retry)="retry()"
+  />
+}
 
 @if (session(); as command) {
   <header class="strip">
@@ -76,15 +78,27 @@
       <qits-button variant="primary" [disabled]="!canSend()" (pressed)="send()">Send</qits-button>
     </footer>
   }
-} @else if (commandsState().kind === 'ready') {
+} @else if (composable()) {
   <header class="strip">
-    <p class="reassure">
-      Switching tabs keeps the agent running; come back to pick up the conversation.
-    </p>
+    @if (inTerminal()) {
+      <p class="reassure">
+        This agent runs in a terminal; its screen is on the Terminal tab. A message sent here is
+        typed into it.
+      </p>
+    } @else {
+      <p class="reassure">
+        The agent is not in a live chat right now. A message sent here resumes it to hear it.
+      </p>
+    }
   </header>
+  @if (lastSent(); as note) {
+    <p class="note" role="status">{{ note }}</p>
+  }
   <app-prompt-panel
     [workspaceRowId]="workspaceRowId()"
+    [agentId]="agentId()"
+    [workId]="workId()"
     [preamble]="preamble()"
-    (launched)="onLaunched($event)"
+    (sent)="onSent($event)"
   />
 }

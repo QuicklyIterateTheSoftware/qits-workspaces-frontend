@@ -4,15 +4,7 @@ import { firstValueFrom } from 'rxjs';
 import { QITS_API_BASE } from './api-base';
 import type {
   ActiveProcessResponse,
-  BootstrapRunDto,
-  BootstrapRunsResponse,
   ContainerProcessResponse,
-  CreateWorkspaceRequest,
-  CreateWorkspaceResponse,
-  DiscardResponse,
-  EditorSessionDto,
-  IntegrateResponse,
-  MergeRequest,
   WorkspaceAgentSessionDto,
   WorkspaceAgentSessionsResponse,
   WorkspaceAgentTranscriptResponse,
@@ -24,16 +16,13 @@ import type {
 } from './dto';
 
 /**
- * The calls this app makes against qits-workspaces: read a repository's workspaces, read one
- * workspace's running process and its history record, drive a container, open a project's editor,
- * and send work home.
+ * The workspace calls this app makes against qits-workspaces: read a repository's workspaces (the
+ * slots agents run in), read one workspace's running process and its history record, and drive a
+ * container. Agents have their own client, {@link ./workspace-agents-api#WorkspaceAgentsApi}.
  *
- * **There is one door home here and it is the integrate**, which is a narrowing of this client
- * rather than a simplification of it. qits-workspaces used to own a release door too — it stamped a
- * version onto the repository's default branch — and that door is gone: the default branch is
- * written by a release request in qits-projects, which folds the request's sources, releases a tag
- * and merges the default branch once the deployment is live. So there is no release call to make
- * from a workspace, and this client makes none.
+ * Nothing here creates a workspace or sends work home: the service makes a slot when an agent needs
+ * one and removes it when its last agent is gone (qits-1152), and work goes home through a release
+ * request in qits-projects.
  *
  * `HttpClient` on the fetch backend rather than bare `fetch()`, for two reasons that both cash out
  * elsewhere: `HttpTestingController` is the only request-mocking story Angular ships, and every
@@ -66,58 +55,8 @@ export class WorkspacesApi {
   }
 
   /**
-   * Create a workspace, and — as the overview always does — over a branch that already exists.
-   *
-   * `repositoryId` is in the body and not in the query string, which is the one thing about this
-   * route worth remembering: the listing above scopes by a query parameter, the create does not.
-   * The service reads the field from the payload and answers 400 without it.
-   *
-   * The create also STARTS the workspace (qits-853): nothing needs `ensureContainer` afterwards.
-   *
-   * Rejects with the `HttpErrorResponse`. A 409 here means the branch already has an active
-   * workspace, which is the race a second press produces — so the caller re-reads the list rather
-   * than retrying.
-   */
-  async createWorkspace(request: CreateWorkspaceRequest): Promise<WorkspaceDto> {
-    const response = await firstValueFrom(
-      this.http.post<CreateWorkspaceResponse>(`${this.base}/workspaces/api/workspaces`, request),
-    );
-    return response.workspace;
-  }
-
-  /**
-   * Integrate one workspace: merge its branch into its **parent** branch and push. No version is
-   * stamped and nothing is released — a task workspace lands on its epic, and the epic is what is
-   * released later.
-   *
-   * The target is not sent: the parent is the service's own fact about the workspace. A workspace
-   * whose parent *is* the default branch is refused with a 409 carrying `RELEASE_REQUIRED` — the
-   * service guarding a branch it does not write at all, and naming the release request in
-   * qits-projects that does. There is no door here to hand such a workspace on to, which is why
-   * that surface is a sentence now rather than a second button.
-   *
-   * Rejects with the `HttpErrorResponse`, which is what {@link
-   * ../merge/merge-outcome#classifyMergeFailure} reads to tell the guards' answers apart.
-   */
-  async integrate(workspaceId: number, summary: string): Promise<IntegrateResponse> {
-    const body: MergeRequest = { summary };
-    return firstValueFrom(
-      this.http.post<IntegrateResponse>(
-        `${this.base}/workspaces/api/workspaces/${encodeURIComponent(workspaceId)}/integrate`,
-        body,
-      ),
-    );
-  }
-
-  /**
-   * One workspace, by the id every route addresses.
-   *
-   * **Nothing on the detail shell calls this yet, and that is the point.** The shell needs the
-   * repository-scoped list regardless — it is the single cache entry that feeds the header, the
-   * status strip and the activity bar at once — so reading one workspace on top of it would be a
-   * second request for data already in hand. The method exists because the endpoint is landing
-   * beside this work and the panels that mount later (a resolved workspace's read, a deep link that
-   * arrives without a repository) are its callers.
+   * One ACTIVE workspace, by its row id. A 404 means it has resolved (or never existed), and
+   * {@link history} is what is left to read.
    */
   async workspace(workspaceId: number): Promise<WorkspaceDto> {
     const response = await firstValueFrom(
@@ -155,32 +94,9 @@ export class WorkspacesApi {
   }
 
   /**
-   * Find or start the platform's editor, and say whether it answers yet.
-   *
-   * **One door for both**, because the request is the same sentence either way: "there should be an
-   * editor here". A fresh one answers `201` and an existing one `200`, with the same body — so the
-   * caller polls this and nothing else, and a reader who reloads mid-start rejoins the editor that
-   * is already coming up instead of asking for a second one.
-   *
-   * **The door is unscoped, and that is the whole change from the generation before it.** There is
-   * one shared editor for the platform rather than one per project: every project's wrapper is
-   * cloned side by side in the single container behind it, so there is nothing for a caller to name
-   * — no `repositoryId`, no project, and an empty body. Which project a reader lands in is decided
-   * after the hand-off, by a `?folder=` on the editor's own address, and never by this request.
+   * Stop the container. Its agents' worktrees stay on the volume.
    */
-  async ensureEditor(): Promise<EditorSessionDto> {
-    return firstValueFrom(
-      this.http.post<EditorSessionDto>(`${this.base}/workspaces/api/editor/ensure`, {}),
-    );
-  }
-
-  /**
-   * Stop the container. The branch is untouched: the container is a cache of it.
-   *
-   * The id is the row id every one of these routes addresses. It is accepted as a string too
-   * because the editor door answers one — same address, spelled the way JSON spells an identifier.
-   */
-  async stopContainer(workspaceId: number | string): Promise<WorkspaceDto> {
+  async stopContainer(workspaceId: number): Promise<WorkspaceDto> {
     return firstValueFrom(
       this.http.post<WorkspaceDto>(
         `${this.base}/workspaces/api/workspaces/${encodeURIComponent(workspaceId)}/stop-container`,
@@ -198,59 +114,13 @@ export class WorkspacesApi {
    * whenever `clean` is not exactly `true` — and "unknown", which is what a disconnected daemon
    * reports, counts as not clean.
    */
-  async recreateContainer(workspaceId: number | string): Promise<ContainerProcessResponse> {
+  async recreateContainer(workspaceId: number): Promise<ContainerProcessResponse> {
     return firstValueFrom(
       this.http.post<ContainerProcessResponse>(
         `${this.base}/workspaces/api/workspaces/${encodeURIComponent(workspaceId)}/recreate-container`,
         {},
       ),
     );
-  }
-
-  /**
-   * Abandon the work: the workspace resolves, unmerged, with an optional markdown note saying why.
-   *
-   * The note is the whole record of what was tried, so it is worth asking for — after this call the
-   * workspace leaves the active list and only the history record remains.
-   *
-   * **`ignoreChanges` is the confirmed override of the clean-working-tree guard**, sent as
-   * `?ignore-changes=true` on the URL — deliberately never part of the body, so the ordinary call
-   * cannot carry it by accident. The first press always goes without it; only after the service has
-   * refused with "uncommitted changes" and the person has confirmed that exact loss does a second
-   * call spell it out.
-   */
-  async discard(
-    workspaceId: number,
-    result: string,
-    ignoreChanges = false,
-  ): Promise<DiscardResponse> {
-    const suffix = ignoreChanges ? '?ignore-changes=true' : '';
-    return firstValueFrom(
-      this.http.post<DiscardResponse>(
-        `${this.base}/workspaces/api/workspaces/${encodeURIComponent(workspaceId)}/discard${suffix}`,
-        { result },
-      ),
-    );
-  }
-
-  /**
-   * When each of this workspace's bootstrap steps last ran, and how it went.
-   *
-   * **Host-owned state, and not a forwarder.** The run *verbs* are the daemon's; this reads a host
-   * table that has to outlive the container, and it is the only place that table is readable from.
-   * The declared chain — what the steps *are* — comes from the daemon's own `GET /bootstrap-commands`
-   * and the two are joined on `bootstrapCommandId`.
-   *
-   * Empty rather than 404 when the chain has never run here: a freshly created workspace has no rows
-   * yet, and that is a state to render.
-   */
-  async bootstrapRuns(workspaceId: number): Promise<readonly BootstrapRunDto[]> {
-    const response = await firstValueFrom(
-      this.http.get<BootstrapRunsResponse>(
-        `${this.base}/workspaces/api/workspaces/${encodeURIComponent(workspaceId)}/bootstrap-runs`,
-      ),
-    );
-    return response.runs ?? [];
   }
 
   /**
@@ -276,7 +146,7 @@ export class WorkspacesApi {
    * **Host-owned, and it must not go through `WorkspaceDaemonApi`.** That client is the
    * container proxy, and a resolved workspace has no container: every call through it answers 404,
    * which is exactly the bug this endpoint exists to fix. The daemon's own session surface is the
-   * right reader while the workspace is *live* — that is what the Agents tab uses — and it stops
+   * right reader while the workspace is *live*, and it stops
    * existing the moment the container is destroyed. The host keeps the record, so the host is who
    * this asks, on the plain `HttpClient` against `/workspaces/api/history/...` like
    * {@link WorkspacesApi.history} beside it.

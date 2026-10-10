@@ -3,59 +3,26 @@ import type { AgentType } from './commands-api';
 import { WorkspaceDaemonApi } from './workspace-daemon-api';
 
 /**
- * The rest of the daemon's coding-agent surface — the parts a launch is not.
- *
- * Written by hand from `daemons/qits-workspace-daemon/docs/openapi.yml`, like every other client
- * here. `POST /agents` lives on {@link ./commands-api#CommandsApi} because a coding agent **is** a
- * command and answers the command envelope; what is left is the three reads the Agents tab is built
- * on — the harnesses, the session lineage and the plugin store — plus the one install verb.
+ * The daemon's container-wide coding-agent surface, written by hand from
+ * `qits-workspace-daemon/docs/openapi.yml`: the harnesses and their sign-in state, and the plugin
+ * store. No agent owns these; the Terminal tab reads them for the agent it shows.
  */
 
-/** The harnesses this container can launch, and the one a fresh launch takes by default. */
+/** What one harness in this image reports. Only the fields this app reads are typed. */
+export interface HarnessCapabilitiesDto {
+  readonly harness: AgentType;
+  /** Whether anybody is signed in on the shared credential volume. A display value, never a gate. */
+  readonly authenticated: boolean;
+  /** Where to sign in, when nobody has. */
+  readonly authDetail?: string;
+}
+
+/** The harnesses this container can launch, the default, and what each reports. */
 export interface AvailableAgentsDto {
   readonly agents: readonly AgentType[];
   readonly defaultAgent: AgentType;
-}
-
-/**
- * One side-chain a session's `Task` calls spawned.
- *
- * `agentType` and `description` are agent-produced free text — clamped by the daemon and either may
- * be absent — so they are rendered as words the agent chose, never matched against a vocabulary.
- */
-export interface AgentSubagentDto {
-  readonly agentId: string;
-  readonly messageCount: number;
-  readonly agentType?: string;
-  readonly description?: string;
-  readonly firstTimestamp?: string;
-}
-
-/**
- * One session in the lineage.
- *
- * **This is a tree, not a list.** `children` recurses to arbitrary depth along `forkedFromSessionId`
- * edges, and `subagents` is a flat list one level deeper.
- *
- * Two absences carry meaning and must not be defaulted away. **`messageCount` omitted means "not
- * swept yet"**, which is a different screen from a swept zero: the count is filled in by the
- * transcript sweep when the run exits. And `subagents` is populated **only after that sweep**, so a
- * live session shows its main thread and gains its side-chains when it ends — which the UI says out
- * loud rather than looking broken.
- */
-export interface AgentSessionNodeDto {
-  readonly sessionId: string;
-  readonly firstRecordedAt?: string;
-  readonly forkedFromSessionId?: string;
-  readonly messageCount?: number;
-  /** The most recent command that drove this session — the daemon's own re-attach target. */
-  readonly newestCommandId?: string;
-  readonly subagents: readonly AgentSubagentDto[];
-  readonly children: readonly AgentSessionNodeDto[];
-}
-
-interface AgentSessionTreeResponse {
-  readonly sessions: readonly AgentSessionNodeDto[];
+  /** Empty until the start-up probe lands. */
+  readonly capabilities?: readonly HarnessCapabilitiesDto[];
 }
 
 /**
@@ -102,27 +69,11 @@ export class AgentsApi {
   /**
    * The harnesses and the resolved default.
    *
-   * Fetched **once per page**: it is resolved from the checkout's `.qits-config.yml` falling through
-   * to the daemon's own configuration, and neither changes under a running container. A resumed
-   * session keeps its original harness, so this only ever drives a *fresh* launch's picker.
+   * Fetched once per page: it does not change under a running container. Its `capabilities` say
+   * whether anybody has signed each harness in.
    */
   async available(workspaceRowId: number): Promise<AvailableAgentsDto> {
     return this.daemon.get<AvailableAgentsDto>(workspaceRowId, '/agents/available');
-  }
-
-  /**
-   * The session lineage, roots first.
-   *
-   * The index is in-memory and dies with the container; the transcripts themselves do not, because
-   * the harness writes them to a volume shared across workspaces. What a recreate loses is the
-   * *index* — which is exactly why a resume across containers is refused rather than attempted.
-   */
-  async sessions(workspaceRowId: number): Promise<readonly AgentSessionNodeDto[]> {
-    const answer = await this.daemon.get<AgentSessionTreeResponse>(
-      workspaceRowId,
-      '/agent-sessions',
-    );
-    return answer.sessions ?? [];
   }
 
   /**

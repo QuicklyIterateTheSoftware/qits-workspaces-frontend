@@ -63,7 +63,11 @@ export interface TerminalSize {
     .loading-screen {
       margin: 0;
       color: #e5e7eb;
-      font: 0.8rem/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+      font:
+        0.8rem/1.35 ui-monospace,
+        SFMono-Regular,
+        Menlo,
+        monospace;
       white-space: pre-wrap;
     }
     .hint {

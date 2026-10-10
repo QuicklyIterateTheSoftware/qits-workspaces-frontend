@@ -47,8 +47,8 @@
         @if (workspace().daemonConnectedAt) {
           {{ reason }}, and this workspace stays on it rather than moving elsewhere.
         } @else {
-          Start, stop and recreate wait for the runner: {{ reason }}, and this workspace stays on
-          it rather than moving elsewhere.
+          Start, stop and recreate wait for the runner: {{ reason }}, and this workspace stays on it
+          rather than moving elsewhere.
         }
       </p>
     } @else if (recreateBlocked()) {
@@ -92,96 +92,6 @@
         .
       </p>
     }
-  </section>
-
-  <section class="field" aria-label="Working tree">
-    <span class="key">Working tree</span>
-    <span class="value">
-      <qits-badge [label]="cleanliness().label" [tone]="cleanliness().tone" />
-      @if (drift()) {
-        <span class="muted">{{ drift() }} on {{ workspace().parent ?? mainBranch() }}</span>
-      }
-      @if (workspace().conflictsWithParent) {
-        <qits-badge label="conflicts with parent" tone="warning" />
-      }
-    </span>
-  </section>
-
-  <section class="field wide" aria-label="Resolution">
-    <span class="key">Resolution</span>
-    <span class="value">
-      <qits-badge [label]="workspace().status.toLowerCase()" [tone]="'info'" />
-    </span>
-    <div class="home">
-      <app-merge-panel
-        [workspace]="workspace()"
-        [mainBranch]="mainBranch()"
-        (merged)="merged.emit($event)"
-        (refresh)="changed.emit()"
-      />
-      @if (discarding()) {
-        <div class="discard">
-          <label class="field-label" for="discard-note"
-            >Why is this being abandoned? It is the only record left afterwards.</label
-          >
-          <textarea
-            id="discard-note"
-            rows="3"
-            [value]="discardNote()"
-            (input)="noteTyped($event)"
-          ></textarea>
-          @if (confirmingIgnoreChanges()) {
-            <p class="fault" role="alert">
-              The working tree has uncommitted changes, and discarding will throw them away with
-              the container and the branch. There is no way back afterwards.
-            </p>
-            <span class="verbs">
-              <qits-button
-                variant="primary"
-                size="sm"
-                [busy]="pending() === 'discard'"
-                [disabled]="pending() !== null"
-                (pressed)="discardIgnoringChanges()"
-                >Discard anyway — lose the changes</qits-button
-              >
-              <qits-button
-                variant="ghost"
-                size="sm"
-                [disabled]="pending() !== null"
-                (pressed)="cancelIgnoreChanges()"
-                >Keep the workspace</qits-button
-              >
-            </span>
-          } @else {
-            <span class="verbs">
-              <qits-button
-                variant="primary"
-                size="sm"
-                [busy]="pending() === 'discard'"
-                [disabled]="pending() !== null"
-                (pressed)="discard()"
-                >Discard this workspace</qits-button
-              >
-              <qits-button
-                variant="ghost"
-                size="sm"
-                [disabled]="pending() !== null"
-                (pressed)="cancelDiscard()"
-                >Cancel</qits-button
-              >
-            </span>
-          }
-        </div>
-      } @else {
-        <qits-button
-          variant="ghost"
-          size="sm"
-          [disabled]="pending() !== null"
-          (pressed)="openDiscard()"
-          >Discard…</qits-button
-        >
-      }
-    </div>
   </section>
 
   @if (failure()) {

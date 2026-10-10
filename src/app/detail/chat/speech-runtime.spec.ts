@@ -34,12 +34,9 @@ describe('activatedMicrophone', () => {
     const createContext = vi.fn();
 
     await expect(
-      activatedMicrophone(
-        async () => {
-          throw denied;
-        },
-        createContext,
-      ),
+      activatedMicrophone(async () => {
+        throw denied;
+      }, createContext),
     ).rejects.toBe(denied);
     expect(createContext).not.toHaveBeenCalled();
   });

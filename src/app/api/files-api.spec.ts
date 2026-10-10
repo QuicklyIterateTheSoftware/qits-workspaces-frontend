@@ -27,21 +27,21 @@ describe('FilesApi', () => {
   afterEach(() => http.verify());
 
   it('reads the whole eager tree with no path at all', async () => {
-    const answer = api.files(7);
-    const request = http.expectOne('/workspaces/container/7/files');
+    const answer = api.files(7, 'a1');
+    const request = http.expectOne('/workspaces/container/7/agent-worktrees/a1/files');
     request.flush({ paths: ['src/main.ts'], lazyDirs: [], generation: 'gen-1' });
 
     // Absent rather than blank: the daemon reads both as "the root", and `path=` would make the
     // request that fetches everything look like a request for a directory called nothing.
-    expect(request.request.urlWithParams).toBe('/workspaces/container/7/files');
+    expect(request.request.urlWithParams).toBe('/workspaces/container/7/agent-worktrees/a1/files');
     expect((await answer).paths).toEqual(['src/main.ts']);
   });
 
   it('asks for one lazy directory by path', async () => {
-    const answer = api.files(7, 'node_modules');
+    const answer = api.files(7, 'a1', 'node_modules');
     const request = http.expectOne(
       (candidate) =>
-        candidate.url === '/workspaces/container/7/files' &&
+        candidate.url === '/workspaces/container/7/agent-worktrees/a1/files' &&
         candidate.params.get('path') === 'node_modules',
     );
     request.flush({
@@ -54,8 +54,8 @@ describe('FilesApi', () => {
   });
 
   it('reads the detection and its token, which is the point of it', async () => {
-    const answer = api.detection(7);
-    http.expectOne('/workspaces/container/7/detection').flush({
+    const answer = api.detection(7, 'a1');
+    http.expectOne('/workspaces/container/7/agent-worktrees/a1/detection').flush({
       projects: [{ root: 'webui', frameworkId: 'angular', label: 'Angular' }],
       frameworks: [
         {
@@ -73,11 +73,11 @@ describe('FilesApi', () => {
   });
 
   it('reads one file by a required path, which is not how /files works', async () => {
-    const answer = api.content(7, 'service/target/build.log');
+    const answer = api.content(7, 'a1', 'service/target/build.log');
     http
       .expectOne(
         (candidate) =>
-          candidate.url === '/workspaces/container/7/files/content' &&
+          candidate.url === '/workspaces/container/7/agent-worktrees/a1/files/content' &&
           candidate.params.get('path') === 'service/target/build.log',
       )
       .flush({ path: 'service/target/build.log', binary: false, content: 'a\nb\n' });
@@ -91,7 +91,7 @@ describe('FilesApi', () => {
    * this shape as "binary" would tell a user their 3 MB log is a picture.
    */
   it('gets the same shape for a binary file and for one over the cap', async () => {
-    const answer = api.content(7, 'dist/app.wasm');
+    const answer = api.content(7, 'a1', 'dist/app.wasm');
     http
       .expectOne((candidate) => candidate.params.get('path') === 'dist/app.wasm')
       .flush({ path: 'dist/app.wasm', binary: true });

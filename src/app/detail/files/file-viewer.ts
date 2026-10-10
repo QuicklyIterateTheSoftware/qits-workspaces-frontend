@@ -196,6 +196,9 @@ export class FileViewer {
 
   readonly workspaceRowId = input.required<number>();
 
+  /** Whose worktree the path is relative to. */
+  readonly agentId = input.required<string>();
+
   /** The open file, or null for the empty state. */
   readonly path = input<string | null>(null);
 
@@ -385,7 +388,7 @@ export class FileViewer {
   private async load(workspaceRowId: number, path: string): Promise<void> {
     this.file.set(LOADING);
     try {
-      const content = await this.filesApi.content(workspaceRowId, path);
+      const content = await this.filesApi.content(workspaceRowId, this.agentId(), path);
       // A late answer for a file nobody is reading any more is dropped rather than drawn: two opens
       // in quick succession must not leave the first one's bytes under the second one's name.
       if (this.path() === path) {

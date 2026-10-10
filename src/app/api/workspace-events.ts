@@ -14,13 +14,13 @@ import { EVENT_SOURCE_FACTORY, type EventSourceLike } from './event-source';
 export const WORKSPACE_TOPICS = [
   'telemetry',
   'commands',
-  'bootstrap',
   'files',
   'git-status',
   'agent-activity',
   'process',
   'prompt-draft',
   'prompt-attachments',
+  'agents',
 ] as const;
 
 /** One of {@link WORKSPACE_TOPICS}. */
@@ -37,7 +37,7 @@ export type WorkspaceTopic = (typeof WORKSPACE_TOPICS)[number];
  * anywhere.
  *
  * **Invalidate everything on every connect, and on every reconnect.** {@link handleOpen} bumps all
- * nine counters. There is no replay protocol here, no `Last-Event-ID`, no resume token and no
+ * ten counters. There is no replay protocol here, no `Last-Event-ID`, no resume token and no
  * snapshot-then-delta — the server offers none and the client must not invent one. The browser's own
  * reconnect handles the retry; this one burst closes whatever gap the disconnected window left. It
  * costs a handful of requests on reconnect and removes an entire class of correctness bugs, which is

@@ -1,0 +1,87 @@
+:host {
+  display: block;
+}
+
+.head h1 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.head h1 .title {
+  margin-left: 0.5rem;
+  color: #374151;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.facts,
+.links,
+.branches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin: 0.4rem 0 0;
+  color: #4b5563;
+  font-size: 0.88rem;
+}
+
+.links a {
+  color: #1d4ed8;
+}
+
+.branches .key {
+  font-weight: 600;
+  color: #374151;
+}
+
+.waiting {
+  margin: 0.4rem 0 0;
+  color: #92400e;
+  font-size: 0.88rem;
+}
+
+.muted {
+  color: #6b7280;
+}
+
+.discard {
+  margin: 0.6rem 0 0.4rem;
+}
+
+.say {
+  margin: 0 0 0.4rem;
+  font-size: 0.88rem;
+}
+
+.verbs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.fault {
+  margin: 0.4rem 0;
+  color: #b91c1c;
+  font-size: 0.88rem;
+}
+
+.fault p {
+  margin: 0 0 0.3rem;
+}
+
+.fault .said {
+  color: #7f1d1d;
+}
+
+.stale {
+  margin: 0.4rem 0 0;
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+
+.explain {
+  margin: 0.6rem 0 0;
+  color: #6b7280;
+  max-width: 44rem;
+}

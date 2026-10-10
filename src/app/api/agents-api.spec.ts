@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { AgentsApi, barePluginId } from './agents-api';
 
 /**
- * The coding-agent reads, and the one verb that has a rule worth a test.
+ * The container-wide coding-agent reads, and the one verb that has a rule worth a test.
  *
  * **The install path takes the bare id.** The listing reports the marketplace-qualified form and the
  * daemon appends the suffix itself, so sending back what was read is a 400 — a mistake that is
@@ -24,35 +24,16 @@ describe('AgentsApi', () => {
 
   afterEach(() => http.verify());
 
-  it('reads the session lineage as a tree, keeping the nesting', async () => {
-    const reading = api.sessions(7);
-    http.expectOne('/workspaces/container/7/agent-sessions').flush({
-      sessions: [
-        {
-          sessionId: 'root',
-          subagents: [],
-          children: [
-            { sessionId: 'fork', forkedFromSessionId: 'root', subagents: [], children: [] },
-          ],
-        },
-      ],
-    });
-    const sessions = await reading;
-    expect(sessions[0].children[0].forkedFromSessionId).toBe('root');
-  });
-
-  it('answers an empty lineage rather than throwing on a container with none', async () => {
-    const reading = api.sessions(7);
-    http.expectOne('/workspaces/container/7/agent-sessions').flush({});
-    expect(await reading).toEqual([]);
-  });
-
   it('reads the harnesses and the resolved default', async () => {
     const reading = api.available(7);
-    http
-      .expectOne('/workspaces/container/7/agents/available')
-      .flush({ agents: ['CLAUDE', 'KIMI'], defaultAgent: 'CLAUDE' });
-    expect((await reading).defaultAgent).toBe('CLAUDE');
+    http.expectOne('/workspaces/container/7/agents/available').flush({
+      agents: ['CLAUDE', 'KIMI'],
+      defaultAgent: 'CLAUDE',
+      capabilities: [{ harness: 'CLAUDE', authenticated: false, authDetail: 'run claude login' }],
+    });
+    const available = await reading;
+    expect(available.defaultAgent).toBe('CLAUDE');
+    expect(available.capabilities?.[0].authenticated).toBe(false);
   });
 
   it('installs by the bare id, whichever form the caller had', async () => {

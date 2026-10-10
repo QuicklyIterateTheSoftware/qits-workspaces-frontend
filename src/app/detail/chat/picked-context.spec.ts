@@ -32,23 +32,23 @@ describe('PickedContext', () => {
 
   it('empties itself when the workspace under it changes', () => {
     // A line range in one workspace's file means nothing in another's.
-    picked.use(7);
+    picked.use('a7');
     picked.addReference(REFERENCE);
     expect(picked.any()).toBe(true);
 
-    picked.use(8);
+    picked.use('a8');
     expect(picked.any()).toBe(false);
   });
 
   it('keeps one entry when the same range is picked twice', () => {
-    picked.use(7);
+    picked.use('a7');
     picked.addReference(REFERENCE);
     picked.addReference({ ...REFERENCE, excerpt: 'different excerpt' });
     expect(picked.references()).toHaveLength(1);
   });
 
   it('removes a reference by its label', () => {
-    picked.use(7);
+    picked.use('a7');
     picked.addReference(REFERENCE);
     picked.removeReference('src/main.ts:10-14');
     expect(picked.references()).toHaveLength(0);
@@ -89,7 +89,7 @@ describe('serializePrompt', () => {
     const prompt = serializePrompt({ text: 'fix this', references: [REFERENCE] });
 
     expect(prompt).toContain('fix this');
-    expect(prompt).toContain('Context picked in the workspace');
+    expect(prompt).toContain('Context picked in the worktree');
     expect(prompt).toContain('src/main.ts:10-14');
   });
 
@@ -98,7 +98,7 @@ describe('serializePrompt', () => {
     const prompt = serializePrompt({ text, references: [REFERENCE] });
 
     expect(prompt).toBe(text);
-    expect(prompt).not.toContain('Context picked in the workspace');
+    expect(prompt).not.toContain('Context picked in the worktree');
   });
 
   it('is empty when there is nothing to say, so an empty draft cannot be launched', () => {

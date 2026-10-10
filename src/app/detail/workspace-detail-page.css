@@ -24,30 +24,6 @@
   overflow-wrap: anywhere;
 }
 
-/* The dispatched workspace's reference, where the prose goal used to be. */
-.subject {
-  margin: 0.4rem 0 0;
-  font-size: 0.9rem;
-}
-
-.subject a {
-  color: #1d4ed8;
-}
-
-.subject span {
-  color: #374151;
-}
-
-.landed {
-  margin: 0.6rem 0 0;
-  font-size: 0.85rem;
-}
-
-.landed ul {
-  margin: 0;
-  padding-left: 1.1rem;
-}
-
 .resolved h1 {
   margin: 0.5rem 0 0;
   font-size: 1.25rem;
@@ -164,4 +140,72 @@
 
 code {
   font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+}
+
+.head .explain {
+  font-size: 0.88rem;
+}
+
+.starting,
+.agents {
+  margin-top: 1rem;
+}
+
+.starting h2,
+.agents h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.agent-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.agent {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.375rem;
+}
+
+.agent-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.agent-name {
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
+.agent .title {
+  color: #374151;
+  overflow-wrap: anywhere;
+}
+
+.facts,
+.branches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  margin: 0.35rem 0 0;
+  color: #4b5563;
+  font-size: 0.85rem;
+}
+
+.facts .sep {
+  margin: 0;
+}
+
+.work-item {
+  display: inline-block;
+  margin-top: 0.35rem;
+  color: #1d4ed8;
+  font-size: 0.85rem;
 }

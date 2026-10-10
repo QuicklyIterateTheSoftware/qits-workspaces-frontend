@@ -10,6 +10,7 @@ import type {
   RepositoryDto,
   RepositoryEntriesResponse,
   RepositoryResponse,
+  WorkItemDto,
   WrapperDto,
 } from './dto';
 
@@ -68,7 +69,9 @@ export class ProjectsApi {
    * aggregate one. `wrapper` is null for a project that has none.
    */
   async components(projectId: string): Promise<ProjectComponents> {
-    const url = await this.url(`/projects/api/projects/${encodeURIComponent(projectId)}/repositories`);
+    const url = await this.url(
+      `/projects/api/projects/${encodeURIComponent(projectId)}/repositories`,
+    );
     const response = await firstValueFrom(
       this.http.get<RepositoryEntriesResponse>(url, { withCredentials: true }),
     );
@@ -78,18 +81,7 @@ export class ProjectsApi {
     };
   }
 
-  /**
-   * One repository, by id — and the detail view's reason for talking to qits-projects at all.
-   *
-   * It reads exactly one field in anger: `mainBranch`, which is what decides whether a workspace
-   * offers **Integrate** or no door at all — work parented on the default branch goes home through a
-   * release request in qits-projects, not from here. That reading has to come from the service that
-   * owns repositories; every repository on this platform says "main" today and none of them promises
-   * to, so assuming the string would put the wrong affordance on the page the day one does not.
-   *
-   * The detail route carries no project id, so the by-id read is not a shortcut past
-   * {@link repositories} — it is the only way in from a deep link.
-   */
+  /** One repository, by id. The workspace page reads its name; a deep link carries only the id. */
   async repository(repositoryId: string): Promise<RepositoryDto> {
     const url = await this.url(`/projects/api/repositories/${encodeURIComponent(repositoryId)}`);
     const response = await firstValueFrom(
@@ -117,5 +109,14 @@ export class ProjectsApi {
       this.http.get<BranchesResponse>(url, { withCredentials: true }),
     );
     return response.branches ?? [];
+  }
+
+  /**
+   * One work item, by qualified id (`qits-617`) or UUID. The new-agent form reads it to send the
+   * item's UUID, its qualified id and its kind: qits-workspaces does not read the work item itself.
+   */
+  async workItem(ref: string): Promise<WorkItemDto> {
+    const url = await this.url(`/projects/api/work/${encodeURIComponent(ref)}`);
+    return firstValueFrom(this.http.get<WorkItemDto>(url, { withCredentials: true }));
   }
 }

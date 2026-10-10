@@ -31,23 +31,26 @@ const NO_MICROPHONE: SpeechRuntime = {
   imports: [PromptPanel],
   template: `<app-prompt-panel
     [workspaceRowId]="workspaceRowId()"
+    agentId="a1"
+    workId="work-1"
     [preamble]="preamble()"
-    (launched)="launched.set($event.id)"
+    (sent)="sent.set($event.resumed ? 'resumed' : 'delivered')"
   />`,
 })
 class PanelHost {
   readonly workspaceRowId = signal(7);
   readonly preamble = signal<string | null>('Speed up the export');
-  readonly launched = signal<string | null>(null);
+  readonly sent = signal<string | null>(null);
 }
 
-const DRAFT_URL = '/workspaces/api/workspaces/7/prompt-draft';
+const DRAFT_URL = '/workspaces/api/agents/a1/prompt-draft';
+const DELIVERY_URL = '/workspaces/api/agent-dispatches/delivery';
 
 /**
  * The composition panel: what it reads, what it saves, and the one rule that must survive every
  * later simplification.
  *
- * **On load this panel reads 1** — `GET /workspaces/api/workspaces/{id}/prompt-draft` — and a 404 is
+ * **On load this panel reads 1** — `GET /workspaces/api/agents/{id}/prompt-draft` — and a 404 is
  * a state rather than a failure.
  */
 describe('PromptPanel', () => {
@@ -379,25 +382,25 @@ describe('PromptPanel', () => {
     expect(fixture.nativeElement.textContent).toContain('The rewrite did not happen');
   });
 
-  it('will not launch on a transcript that was never promoted', async () => {
+  it('will not send a transcript that was never promoted', async () => {
     // The prompt box is the draft. Dictating is not composing until it has been moved.
     await opened();
 
     dictate('never promoted');
-    press('Start the conversation');
+    press('Send to the agent');
     await settle();
 
-    http.expectNone('/workspaces/container/7/agents');
+    http.expectNone(DELIVERY_URL);
   });
 
-  it('flushes the draft before it launches', async () => {
+  it('flushes the draft, sends the turn through the delivery door, then empties the box', async () => {
     fixture.detectChanges();
     http.expectOne(DRAFT_URL).flush({ message: 'none' }, { status: 404, statusText: 'Not Found' });
     await settle();
 
     type('build the thing');
-    // Deliberately inside the debounce window: the launch must not race it.
-    press('Start the conversation');
+    // Deliberately inside the debounce window: the send must not race it.
+    press('Send to the agent');
     await settle();
 
     const save = http.expectOne(DRAFT_URL);
@@ -405,59 +408,41 @@ describe('PromptPanel', () => {
     save.flush({ draft: { content: save.request.body.content, updatedAt: 'T1' } });
     await settle();
 
-    const launch = http.expectOne('/workspaces/container/7/agents');
-    // The surface rides the body. This request is byte-identical to the refining route's in
-    // qits-projects-frontend without it, so it is the only thing that says which chat this is.
-    expect(launch.request.body).toEqual({
-      scope: 'REPOSITORY',
-      surface: 'workspace.chat',
-      mode: 'CHAT',
-      initialContext: 'build the thing',
-      deliverTaskPrompt: false,
+    const delivery = http.expectOne(DELIVERY_URL);
+    expect(delivery.request.body).toEqual({
+      workId: 'work-1',
+      text: 'build the thing',
+      compactFirst: false,
     });
-    launch.flush({ command: { id: 'cmd-9', kind: 'CHAT', status: 'RUNNING' } });
+    delivery.flush({ agentId: 'a1', delivered: false, launched: false, resumed: true });
     await settle();
 
-    expect(host.launched()).toBe('cmd-9');
+    expect(host.sent()).toBe('resumed');
+    const drop = http.expectOne(DRAFT_URL);
+    expect(drop.request.method).toBe('DELETE');
+    drop.flush(null, { status: 204, statusText: 'No Content' });
+    await settle();
+    expect(text().value).toBe('');
   });
 
-  it('says nobody is signed in, and offers the terminal instead of opening one', async () => {
-    // The bug this closes: the launch used to *become* a login terminal and this panel handed the
-    // caller a `TERMINAL` command to attach a conversation to. Nothing in the answer said so.
+  it('says so when nobody works on the item any more', async () => {
     await opened();
-
     type('build the thing');
-    press('Start the conversation');
+    press('Send to the agent');
     await settle();
     http.expectOne(DRAFT_URL).flush({ draft: { content: '{}', updatedAt: 'T1' } });
     await settle();
-
-    http.expectOne('/workspaces/container/7/agents').flush(
-      {
-        message:
-          'Nobody has signed Claude Code in on this platform’s shared credential volume, so this' +
-          ' session cannot start. Open the Claude Code sign-in terminal to complete it once for' +
-          ' every container on the volume.',
-      },
-      { status: 409, statusText: 'Conflict' },
-    );
+    http
+      .expectOne(DELIVERY_URL)
+      .flush({ agentId: null, delivered: false, launched: false, resumed: false });
     await settle();
 
-    expect(host.launched()).toBeNull();
-    expect(fixture.nativeElement.textContent).toContain('Nobody has signed Claude Code in');
-    // Said plainly, and not as the generic "the agent did not start" this used to fall through to.
-    expect(fixture.nativeElement.textContent).not.toContain('The agent did not start');
-
-    // And the door is a press, which is the whole difference.
-    press('Open the sign-in terminal');
-    await settle();
-    const door = http.expectOne('/workspaces/container/7/agents/sign-in');
-    expect(door.request.body).toEqual({ agentType: 'CLAUDE' });
-    door.flush({ command: { id: 'login1', actionName: 'Claude sign-in', agentSessions: [] } });
-    await settle();
+    expect(host.sent()).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('No agent works on this item');
+    expect(text().value).toBe('build the thing');
   });
 
-  it('aborts the launch when the flush fails, and says why', async () => {
+  it('aborts the send when the flush fails, and says why', async () => {
     // Launching with the wrong prompt is worse than not launching — and a draft that failed to save
     // is work about to be lost.
     fixture.detectChanges();
@@ -465,7 +450,7 @@ describe('PromptPanel', () => {
     await settle();
 
     type('build the thing');
-    press('Start the conversation');
+    press('Send to the agent');
     await settle();
 
     http
@@ -473,9 +458,9 @@ describe('PromptPanel', () => {
       .flush({ message: 'nope' }, { status: 500, statusText: 'Server Error' });
     await settle();
 
-    http.expectNone('/workspaces/container/7/agents');
-    expect(fixture.nativeElement.textContent).toContain('nothing was launched');
-    expect(host.launched()).toBeNull();
+    http.expectNone(DELIVERY_URL);
+    expect(fixture.nativeElement.textContent).toContain('nothing was sent');
+    expect(host.sent()).toBeNull();
   });
 
   it('discards the draft, its picks and the hint together', async () => {
@@ -515,14 +500,14 @@ describe('PromptPanel', () => {
     expect(fixture.nativeElement.textContent).toContain('Refine into prompt');
   });
 
-  it('will not launch an empty prompt', async () => {
+  it('will not send an empty prompt', async () => {
     fixture.detectChanges();
     http.expectOne(DRAFT_URL).flush({ message: 'none' }, { status: 404, statusText: 'Not Found' });
     await settle();
 
-    press('Start the conversation');
+    press('Send to the agent');
     await settle();
-    http.expectNone('/workspaces/container/7/agents');
+    http.expectNone(DELIVERY_URL);
   });
 
   function press(label: string): void {

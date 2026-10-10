@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { QitsButton } from '@qits/ui-components';
 import { CommandsApi, type CommandDto } from '../../api/commands-api';
+import type { AgentDeliveryDto } from '../../api/dto';
 import { WEB_SOCKET_FACTORY } from '../../api/web-socket';
 import { WorkspaceCommands } from '../../api/workspace-commands';
 import { WorkspaceDaemonApi } from '../../api/workspace-daemon-api';
@@ -22,38 +23,18 @@ import { Conversation } from './conversation';
 import { PromptPanel } from './prompt-panel';
 
 /**
- * The room's front door: compose a prompt, or watch the agent work.
+ * One agent's conversation: watch it work, or say the next thing.
  *
- * ## What it loads
+ * **On first open this panel reads `1`, plus one socket while the agent's chat runs.** The read is
+ * the container's command list, a shared entry the Terminal tab reads too.
  *
- * **On first open this panel reads `1`, plus one socket while a session is live.** The read is the
- * container's command list, and it is a *shared* entry — the Actions history, the session tree and
- * the embedded session read the same one, so being first here costs the others nothing. The prompt
- * panel's own draft read is its budget, not this one's.
+ * The agent's harness is one command, named by the daemon's worktree read (`commandId`). While that
+ * command is a running `CHAT`, this tab attaches to its socket and a typed turn goes down it. When it
+ * is not — the agent yielded, is queued, or runs in a terminal — the prompt panel sends the turn
+ * through the service's delivery door, which resumes the agent to hear it (qits-1152).
  *
- * ## Two modes, one tab, no navigation
- *
- * Nothing running is the prompt panel. Something running is the conversation. Launching swaps one
- * for the other **in place** — the spec is specific that this is not a navigation, and it is the
- * behaviour that makes the tab feel like a room rather than a form.
- *
- * A session started anywhere is picked up here, because the mode is derived from the command list
- * and not from what this panel did. That is also why the list keeps refreshing while the tab is
- * hidden: coming back to a prompt panel over a running agent would be a lie.
- *
- * ## The launch bridge
- *
- * A launch answers before the registry reports the new run, so a panel driven purely off the list
- * blinks back to its empty state for a beat after every launch. {@link bridged} holds the id the
- * launch just returned and stops the moment the registry knows the command — either by reporting it
- * running, or by reporting it finished.
- *
- * ## Side-chains join at the end, and the UI says so
- *
- * The live tail covers the main session only; a sub-agent's side-chain is imported by the exit
- * sweep. So a running conversation shows the main thread and *gains* its side-chains when the run
- * ends. Left unsaid that reads as a bug — an agent visibly spawning sub-agents whose work never
- * appears — so it is said, once, in the header strip while the run is live.
+ * The live tail covers the main session only; sub-agent side-chains join when the run ends, and the
+ * header says so while the run is live.
  */
 @Component({
   selector: 'app-chat-panel',
@@ -68,16 +49,25 @@ export class ChatPanel {
   private readonly daemon = inject(WorkspaceDaemonApi);
   private readonly openSocket = inject(WEB_SOCKET_FACTORY);
 
-  /** Which workspace's container this conversation lives in. */
+  /** The agent's workspace. 0 while the agent is queued and has none. */
   readonly workspaceRowId = input.required<number>();
 
-  /** The workspace's stated goal, handed to the refinement request. */
+  /** The agent this conversation is with. */
+  readonly agentId = input.required<string>();
+
+  /** The agent's work item, which the delivery door is keyed by. */
+  readonly workId = input.required<string>();
+
+  /** The agent's harness command, as its worktree reports it. Null while the daemon knows none. */
+  readonly commandId = input<string | null>(null);
+
+  /** What the work is about, handed to the prompt rewrite. */
   readonly preamble = input<string | null>(null);
 
   protected readonly commandsState = this.commands.commands;
 
-  /** The command a launch just returned, until the registry has an opinion about it. */
-  private readonly bridged = signal<CommandDto | null>(null);
+  /** What the last turn sent from the prompt panel became, in words. */
+  protected readonly lastSent = signal<string | null>(null);
 
   protected readonly terminating = signal(false);
   protected readonly terminateProblem = signal<string | null>(null);
@@ -92,22 +82,7 @@ export class ChatPanel {
   constructor() {
     effect(() => {
       const workspaceRowId = this.workspaceRowId();
-      untracked(() => {
-        // The bridge is about one launch in one container. The shell remounts this panel when the
-        // workspace changes, but a panel that only worked because its host tore it down would be a
-        // dependency nobody wrote down.
-        this.bridged.set(null);
-        this.commands.use(workspaceRowId);
-      });
-    });
-
-    // The bridge ends when the registry knows the id, whatever it says about it.
-    effect(() => {
-      const state = this.commandsState();
-      const bridged = untracked(() => this.bridged());
-      if (bridged && state.kind === 'ready' && state.value.some((row) => row.id === bridged.id)) {
-        untracked(() => this.bridged.set(null));
-      }
+      untracked(() => this.commands.use(workspaceRowId));
     });
 
     effect(() => {
@@ -121,9 +96,31 @@ export class ChatPanel {
 
   // ---- which conversation, if any ----------------------------------------------------------------
 
-  /** The chat that owns this workspace: what the registry says, or what a launch just returned. */
-  protected readonly session = computed<CommandDto | null>(
-    () => this.commands.runningChat() ?? this.bridged(),
+  /** The agent's harness command, once the command list has it. */
+  private readonly harness = computed<CommandDto | null>(() => {
+    const id = this.commandId();
+    const state = this.commandsState();
+    if (!id || state.kind !== 'ready') {
+      return null;
+    }
+    return state.value.find((command) => command.id === id) ?? null;
+  });
+
+  /** The agent's chat while it runs; null when there is no live chat to attach to. */
+  protected readonly session = computed<CommandDto | null>(() => {
+    const command = this.harness();
+    return command && command.kind === 'CHAT' && command.status === 'RUNNING' ? command : null;
+  });
+
+  /** The agent runs its harness in a terminal: its screen is on the Terminal tab. */
+  protected readonly inTerminal = computed(() => {
+    const command = this.harness();
+    return command !== null && command.kind === 'TERMINAL' && command.status === 'RUNNING';
+  });
+
+  /** Whether the prompt panel can be drawn: the list answered, or there is no container to ask. */
+  protected readonly composable = computed(
+    () => this.workspaceRowId() <= 0 || this.commandsState().kind !== 'loading',
   );
 
   private readonly lines = computed<readonly string[]>(() => this.socket()?.lines() ?? []);
@@ -146,9 +143,9 @@ export class ChatPanel {
 
   // ---- what the panel does ------------------------------------------------------------------------
 
-  /** A launch from the prompt panel. The mode swaps here rather than navigating. */
-  protected onLaunched(command: CommandDto): void {
-    this.bridged.set(command);
+  /** A turn the prompt panel sent through the delivery door. */
+  protected onSent(delivery: AgentDeliveryDto): void {
+    this.lastSent.set(deliveryNote(delivery));
     void this.commands.refresh();
   }
 
@@ -224,4 +221,20 @@ export class ChatPanel {
     this.socket.set(null);
     this.attached.set(null);
   }
+}
+
+/** What became of a delivered turn, in words. */
+export function deliveryNote(delivery: AgentDeliveryDto): string {
+  if (delivery.resumed) {
+    return 'Sent. The agent resumes to hear it.';
+  }
+  if (delivery.launched) {
+    return 'Sent. The agent hears it as its first turn, once it starts.';
+  }
+  if (delivery.delivered) {
+    return 'Sent. The agent hears it at its next turn boundary.';
+  }
+  return (
+    delivery.detail?.trim() || 'The service took the message but did not say what became of it.'
+  );
 }

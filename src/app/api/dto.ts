@@ -15,17 +15,10 @@
  * `Instant` arrives as an ISO-8601 string; every timestamp below is typed as one.
  */
 
-/** A workspace's resolution state. `ACTIVE` is the only one an integrate can be offered on. */
+/** A workspace's resolution state. A slot stays `ACTIVE` until its last agent is gone. */
 export type WorkspaceStatus = 'ACTIVE' | 'INTEGRATED' | 'ABANDONED';
 
-/**
- * The container's runtime state, independent of {@link WorkspaceStatus}: the branch is the source
- * of truth and the container is a recreatable cache of it.
- *
- * It is shown here and never gated on. **Both merges read the durable branch, not the container** —
- * qits-workspaces merges from the bare origin's refs — so a STOPPED workspace releases and
- * integrates exactly as well as a RUNNING one, and disabling the button on one would be a fiction.
- */
+/** The container's runtime state, independent of {@link WorkspaceStatus}. */
 export type WorkspaceRuntimeStatus =
   'RUNNING' | 'STOPPED' | 'PROVISIONING' | 'FAILED' | 'QUEUED' | 'UNAVAILABLE';
 
@@ -35,8 +28,7 @@ export type WorkspaceRuntimeStatus =
  *
  * **The service decides it unconditionally; the create request no longer chooses it.** Every
  * regular workspace is placed on a runner, full stop — asking for `DIRECT` on one is refused with a
- * 400. An admin workspace and the one shared editor are the opposite: always `DIRECT`, and asking
- * for `RUNNER` on either is the same 400.
+ * 400. An admin workspace is the opposite: always `DIRECT`.
  *
  * Two runtime states exist only for `RUNNER`. `QUEUED` is persisted — the workspace was asked to
  * start and waits for a slot on its runner (or, never placed yet, for any runner). `UNAVAILABLE` is
@@ -74,14 +66,11 @@ export type AgentActivityState = 'IDLE' | 'BUSY' | 'WAITING' | 'ENDED';
 /**
  * One workspace, as qits-workspaces lists it.
  *
- * `id` is the identifier every route addresses — including the two merge ones. `workspaceId` is the
- * branch-derived *label*: unique only per repository and reusable once the workspace resolves, so
- * it is displayed and never used to address anything.
+ * `id` is the identifier every route addresses. `workspaceId` is the *label* (`ws-<id>` for a slot):
+ * displayed, never used to address anything.
  *
- * `parent` is the branch this work goes home to, and it is what picks the door: a workspace whose
- * parent is the repository's default branch is **released**, any other workspace is **integrated**
- * into that parent. So this field is not decoration on the row — it decides which action the row
- * offers.
+ * A slot (qits-1152) has no branch, parent, ahead/behind or work item: those are each agent's. The
+ * fields stay for workspaces made before the change.
  */
 export interface WorkspaceDto {
   readonly id: number;
@@ -143,16 +132,6 @@ export interface WorkspaceDto {
   readonly admin?: boolean;
 
   /**
-   * Whether this row **is** the platform editor — the one shared `/editor` container, which rides
-   * no particular piece of work.
-   *
-   * Decided at creation like `admin`, and **optional for the same reason**: a service that predates
-   * the field answers nothing here, and absent means `false` rather than claiming the row is
-   * ordinary. Read it as the editor only when it is literally `true`.
-   */
-  readonly editor?: boolean;
-
-  /**
    * Where the container runs, and on which runner. **Optional**, for the reason `admin` is: a
    * service that predates placement answers none of the three, and every such row is `DIRECT` —
    * so a row is runner-placed only when `placement` is literally `'RUNNER'`.
@@ -204,45 +183,6 @@ export interface ActiveProcessResponse {
 export interface ContainerProcessResponse {
   readonly workspace: WorkspaceDto;
   readonly technicalProcessId: string | null;
-}
-
-/**
- * The in-container editor's own state, as the daemon reports it, and it is **not** the container's.
- *
- * A container can be `RUNNING` with no editor in it yet — `STARTING` is the whole reason this page
- * has a waiting state — and `ENDED` is an editor that ran and stopped inside a container that is
- * still up. `null` is a container the daemon has not answered for at all, which reads as "not yet"
- * rather than as an ending.
- */
-export type EditorState = 'STARTING' | 'RUNNING' | 'ENDED';
-
-/**
- * What `POST /workspaces/api/editor/ensure` answers: the workspace carrying the platform's one
- * shared editor, what its container is doing, and the one field a caller acts on.
- *
- * The door names no project — there is a single editor for the whole platform, holding every
- * project's wrapper side by side — so this body is the same body for every caller, and a request
- * that carried a scope would be answering a question nobody asks any more.
- *
- * **`editorReady` is the readiness, and the two states are not it.** A caller that waited for
- * `editorState === 'RUNNING'` would be deciding for itself when the editor answers requests; the
- * service owns that judgement — it holds the container status *and* the daemon's report — and says
- * so in one boolean. The states are what the page *shows* while the boolean is false, and `ENDED`
- * is the one that stops the waiting rather than continuing it.
- *
- * The call is idempotent: a second one against a live editor answers `200` with the same body a
- * `201` carried, which is what makes polling it the whole readiness protocol.
- */
-export interface EditorSessionDto {
-  readonly workspaceId: string;
-  readonly containerStatus: string;
-  readonly editorState: EditorState | null;
-  readonly editorReady: boolean;
-}
-
-/** What `discard` answers. One boolean, and the workspace is resolved by the time it arrives. */
-export interface DiscardResponse {
-  readonly success: boolean;
 }
 
 /** One entry in a resolved workspace's narrative: what happened to the branch, and when. */
@@ -392,65 +332,6 @@ export interface TechnicalProcessFrame {
  */
 export const HINT_REMOTE_AUTH = 'remote-auth';
 
-/**
- * What `POST …/{id}/integrate` takes. One field, and no target.
- *
- * **The target is not a parameter: it is derived from the workspace.** An integrate always lands on
- * the workspace's parent branch, which is a fact the service already holds — so a client that could
- * name a target would be describing an API that does not exist.
- *
- * The summary becomes the merge commit's subject, as `integrate(<branch>): <summary>`. It is capped
- * at 100 characters on both sides: the conventional 72-character subject budget minus roughly the 24
- * a scope costs, rounded to a number a person can be told.
- */
-export interface MergeRequest {
-  readonly summary: string;
-}
-
-/** The summary cap, server-side `@Size(max = 100)` and the input's `maxlength` alike. */
-export const SUMMARY_MAX_LENGTH = 100;
-
-/**
- * What a successful integrate answers. **No version** — an integrate stamps none, because it is a
- * merge and not a release.
- *
- * `targetBranch` is the parent the work landed on. It is answered rather than assumed: the client
- * picked this door from the workspace's `parent`, and the service is the one that decides where an
- * integrate goes.
- */
-export interface IntegrateResponse {
-  readonly commitSha: string;
-  readonly branch: string;
-  readonly targetBranch: string;
-}
-
-/** How a bootstrap step's most recent run ended. */
-export type BootstrapOutcome = 'SKIPPED' | 'SUCCEEDED' | 'FAILED';
-
-/**
- * The most recent run of one bootstrap step in one workspace.
- *
- * **One row per (workspace, step), overwritten on each run** — a last-run view and never a log. That
- * is why the section below the chain says "last run" and offers no history: there is none to offer.
- *
- * `bootstrapCommandId` is the join key against the daemon's declared chain, which is why the id is
- * on the row rather than only the display name. `commandId` is null for a `SKIPPED` step, which
- * spawns no command and therefore has no output.
- */
-export interface BootstrapRunDto {
-  readonly bootstrapCommandId: string;
-  readonly commandName: string;
-  readonly outcome: BootstrapOutcome;
-  readonly commandId: string | null;
-  readonly exitCode: number | null;
-  readonly ranAt: string;
-}
-
-/** The bootstrap-run envelope. */
-export interface BootstrapRunsResponse {
-  readonly runs: readonly BootstrapRunDto[];
-}
-
 /** A project's dns record, or the whole object is null when it registers no domain. */
 export interface ProjectDnsRecordDto {
   readonly domain: string;
@@ -492,8 +373,7 @@ export type RepositoryArchetype =
  * A repository.
  *
  * `id` is the git-host directory name, and it is the string qits-workspaces scopes its workspace
- * list by. `mainBranch` is the branch an integrate targets — displayed so the page can name the
- * destination rather than assuming the string "main".
+ * list by.
  */
 export interface RepositoryDto {
   readonly id: string;
@@ -560,53 +440,6 @@ export interface BranchDto {
 /** The branch list's envelope — a bare array under `branches`, not projects' `entries` wrapper. */
 export interface BranchesResponse {
   readonly branches: readonly BranchDto[];
-}
-
-/**
- * What creating a workspace takes.
- *
- * **`repositoryId` rides in the body**, unlike the listing's query parameter: a create carries its
- * scope in the payload, and the repository is not a filter on a POST.
- *
- * `id` is the requested *label*, not an identifier — the created workspace's identifier comes back
- * in the answer. `adoptExisting` is what tells the service to take over a branch that already
- * exists instead of forking a fresh one, which is the whole of the overview's create action: the
- * branch is already there, and it is the workspace that is missing.
- */
-export interface CreateWorkspaceRequest {
-  readonly repositoryId: string;
-  readonly id: string;
-  readonly parent: string;
-  readonly branch: string;
-  readonly preamble: string;
-  readonly adoptExisting: boolean;
-  readonly branchTree?: boolean;
-
-  /**
-   * Ask for **admin mode**: the workspace's container is launched with the host's docker socket
-   * bound into it, so platform administration can be done from inside the workspace.
-   *
-   * Optional and **omitted means no** — a body without it creates an ordinary workspace, which is
-   * what every caller on this SPA but the ad-hoc creator's checkbox sends. The service decides it
-   * once, at creation; no request afterwards can promote a workspace.
-   */
-  readonly admin?: boolean;
-}
-
-/**
- * What a create answers: the workspace it just made, and the start the create ran on it — creating
- * a workspace starts it, so there is no second call to make.
- */
-export interface CreateWorkspaceResponse {
-  readonly workspace: WorkspaceDto;
-  /**
-   * A DIRECT workspace's start, the same technical process `ensure-container` answers. Null for a
-   * RUNNER workspace, which the create wrote QUEUED and whose runtime status is its progress.
-   * Optional: a service from before the create started anything sends no such field.
-   */
-  readonly technicalProcessId?: string | null;
-  /** Why the start was refused after the row was written; the workspace exists regardless. */
-  readonly startError?: string | null;
 }
 
 /**
@@ -803,4 +636,123 @@ export interface RunnerRegistrationDto {
   readonly runner: WorkspaceRunnerDto;
   readonly registrationToken: string;
   readonly installLine: string;
+}
+
+/** An agent's lifecycle (qits-1152): `OBSOLETE` once its branches are released, `REMOVED` after cleanup. */
+export type AgentState = 'ACTIVE' | 'OBSOLETE' | 'REMOVED';
+
+/** Whether an agent holds its workspace's one harness slot. `QUEUED` has no workspace yet. */
+export type AgentRunState = 'QUEUED' | 'RUNNING' | 'YIELDED';
+
+/** The coding-agent harness an agent runs. */
+export type AgentHarness = 'CLAUDE' | 'KIMI';
+
+/** One branch an agent pushed, one per repository it touched. */
+export interface AgentBranchDto {
+  readonly repositoryId: string | null;
+  readonly branch: string;
+  readonly sha?: string | null;
+  readonly pushedAt?: string | null;
+}
+
+/**
+ * One agent: a work item's coding agent and its worktree inside a workspace.
+ *
+ * `workId` is the work item's UUID and `entityId` its qualified id (`qits-617`), which is what a
+ * person reads. `workspaceRowId` is null while the agent is `QUEUED`.
+ */
+export interface AgentDto {
+  readonly agentId: string;
+  readonly workspaceRowId: number | null;
+  readonly repositoryId: string;
+  readonly workId: string;
+  readonly entityId?: string | null;
+  readonly ticketId?: string | null;
+  readonly epicId?: string | null;
+  readonly wrapperBranch: string;
+  readonly branches: readonly AgentBranchDto[];
+  readonly state: AgentState;
+  readonly runState: AgentRunState;
+  readonly admin: boolean;
+  readonly harness?: AgentHarness | null;
+  readonly sessionId?: string | null;
+  readonly entityTitle?: string | null;
+  readonly entityStatus?: string | null;
+  readonly entityBlocked?: boolean | null;
+  readonly activity?: AgentActivityState | null;
+  readonly waitingSince?: string | null;
+  readonly lastActivityAt?: string | null;
+  readonly createdAt?: string | null;
+  readonly obsoleteAt?: string | null;
+  readonly removedAt?: string | null;
+}
+
+/** `GET /workspaces/api/agents` answers `{agents: […]}`, newest first. */
+export interface AgentsResponse {
+  readonly agents: readonly AgentDto[];
+}
+
+/** What happened to a new agent's start. `QUEUED`: no workspace slot is free yet. */
+export type AgentLaunch = 'SCHEDULED' | 'SKIPPED_RUNNING' | 'QUEUED';
+
+/** What `POST /workspaces/api/agents` answers. `fresh: false` is the item's existing agent. */
+export interface AgentDispatchDto {
+  readonly agent: AgentDto;
+  readonly fresh: boolean;
+  readonly agentLaunch: AgentLaunch;
+  readonly agentIdentity?: string | null;
+}
+
+/**
+ * A person's request for an agent on an existing work item (D24).
+ *
+ * `workId` is the item's UUID, `entityId` its qualified id and `kind` `TICKET` or `EPIC`; the service
+ * derives the wrapper branch (`ticket/<entityId>`) from the last two.
+ */
+export interface CreateAgentRequest {
+  readonly repositoryId: string;
+  readonly workId: string;
+  readonly entityId?: string;
+  readonly kind?: 'TICKET' | 'EPIC';
+  readonly wrapperBranch?: string;
+  readonly admin: boolean;
+  readonly harness?: AgentHarness;
+  readonly instruction?: string;
+}
+
+/** What `POST /workspaces/api/agent-dispatches/delivery` answers. `agentId: null`: nobody works on it. */
+export interface AgentDeliveryDto {
+  readonly agentId: string | null;
+  readonly delivered: boolean;
+  readonly launched: boolean;
+  readonly resumed: boolean;
+  readonly detail?: string | null;
+}
+
+/** A declared wait's state (qits-1153). */
+export type AgentWaitState = 'OPEN' | 'MATCHED' | 'TIMED_OUT' | 'CANCELLED';
+
+/** What an agent waits on (qits-1153). Only what this page shows is typed. */
+export interface AgentWaitDto {
+  readonly id: string;
+  readonly agentId: string;
+  readonly label?: string | null;
+  readonly selection?: { readonly event?: string } | null;
+  readonly state: AgentWaitState;
+  readonly createdAt?: string | null;
+  readonly expiresAt?: string | null;
+}
+
+/** The work item kinds qits-projects knows. Only tickets and epics get an agent. */
+export type WorkArchetype = 'EPIC' | 'TICKET' | 'FEATURE' | 'TASK' | 'CAMPAIGN';
+
+/** One work item, as `GET /projects/api/work/{qualifiedId}` answers it. Only what this app reads. */
+export interface WorkItemDto {
+  readonly id: string;
+  readonly archetype: WorkArchetype;
+  readonly projectId: string;
+  readonly qualifiedId: string;
+  readonly title?: string | null;
+  readonly status?: string | null;
+  readonly blocked?: boolean | null;
 }

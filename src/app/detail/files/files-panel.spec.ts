@@ -75,7 +75,7 @@ const LINKED = detectionAt('gen-1', [
   selector: 'app-panel-host',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FilesPanel],
-  template: `<app-files-panel [workspaceRowId]="id()" [visible]="visible()" />`,
+  template: `<app-files-panel [workspaceRowId]="id()" agentId="a1" [visible]="visible()" />`,
 })
 class PanelHost {
   readonly id = signal(7);
@@ -161,10 +161,12 @@ describe('FilesPanel', () => {
     detection: DetectionDto | null = detectionAt('gen-1'),
   ): void {
     const files = http.expectOne(
-      (request) => request.url === '/workspaces/container/7/files' && !request.params.has('path'),
+      (request) =>
+        request.url === '/workspaces/container/7/agent-worktrees/a1/files' &&
+        !request.params.has('path'),
     );
     files.flush(listing);
-    const detect = http.expectOne('/workspaces/container/7/detection');
+    const detect = http.expectOne('/workspaces/container/7/agent-worktrees/a1/detection');
     if (detection) {
       detect.flush(detection);
     } else {
@@ -176,7 +178,7 @@ describe('FilesPanel', () => {
   function answerContent(path: string, content: string | null): void {
     const request = http.expectOne(
       (candidate) =>
-        candidate.url === '/workspaces/container/7/files/content' &&
+        candidate.url === '/workspaces/container/7/agent-worktrees/a1/files/content' &&
         candidate.params.get('path') === path,
     );
     request.flush(content === null ? { path, binary: true } : { path, binary: false, content });
@@ -219,8 +221,8 @@ describe('FilesPanel', () => {
       const requests = http.match(() => true);
 
       expect(requests.map((request) => request.request.urlWithParams).sort()).toEqual([
-        '/workspaces/container/7/detection',
-        '/workspaces/container/7/files',
+        '/workspaces/container/7/agent-worktrees/a1/detection',
+        '/workspaces/container/7/agent-worktrees/a1/files',
       ]);
       for (const request of requests) {
         request.flush(request.request.url.endsWith('/detection') ? detectionAt('gen-1') : ROOT);
@@ -236,7 +238,7 @@ describe('FilesPanel', () => {
       http
         .expectOne(
           (request) =>
-            request.url === '/workspaces/container/7/files' &&
+            request.url === '/workspaces/container/7/agent-worktrees/a1/files' &&
             request.params.get('path') === 'node_modules',
         )
         .flush({
@@ -282,7 +284,7 @@ describe('FilesPanel', () => {
 
       const requests = http.match(() => true);
       expect(requests.map((request) => request.request.urlWithParams)).toEqual([
-        '/workspaces/container/7/files/content?path=README.md',
+        '/workspaces/container/7/agent-worktrees/a1/files/content?path=README.md',
       ]);
       requests[0].flush({ path: 'README.md', binary: false, content: 'hello\n' });
       await settle();

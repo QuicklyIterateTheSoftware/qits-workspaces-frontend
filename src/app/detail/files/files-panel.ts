@@ -135,12 +135,15 @@ export class FilesPanel {
   /** Which workspace's container to read. The row id, which is what the proxy addresses. */
   readonly workspaceRowId = input.required<number>();
 
+  /** Whose worktree to browse. The page remounts this panel when the agent changes. */
+  readonly agentId = input.required<string>();
+
   /**
    * Whether this tab is the one showing.
    *
    * The panel is mounted whether or not it is — that is the tab contract — so this is what stops it
    * refetching behind another tab. It is an input rather than something read from a host, because
-   * the policy differs per panel: Chat and Agents keep working while hidden and this one must not.
+   * the policy differs per panel: Chat and Terminal keep working while hidden and this one must not.
    */
   readonly visible = input(false);
 
@@ -153,7 +156,7 @@ export class FilesPanel {
    *
    * It is the URL rather than a local signal because opening a file costs a request — the house rule
    * is that expensive state is addressable state — and because it is what makes the two entry points
-   * ordinary rather than special: an "open in source" from the Agents tab is the same navigation a
+   * ordinary rather than special: an "open in source" from another tab is the same navigation a
    * tree click makes.
    */
   readonly selectedPath = computed(() => this.query$().get('path'));
@@ -676,18 +679,18 @@ export class FilesPanel {
       return;
     }
     const detecting = this.filesApi
-      .detection(workspaceRowId)
+      .detection(workspaceRowId, this.agentId())
       .then((detection) => {
         this.incoming.set(detection);
-        // Handed on so the Agents tab's plugin recommender never fetches this surface a second
+        // Handed on so the Terminal tab's plugin recommender never fetches this surface a second
         // time. One entry, one read — the panel that owns the generation gate keeps owning it.
-        this.shared.publish(workspaceRowId, detection);
+        this.shared.publish({ workspaceRowId, agentId: this.agentId() }, detection);
       })
       .catch(() => undefined);
 
     this.listing.set(LOADING);
     try {
-      const listing = await this.filesApi.files(workspaceRowId);
+      const listing = await this.filesApi.files(workspaceRowId, this.agentId());
       // The per-directory cache describes one generation. While the token holds, re-expanding an
       // opened directory stays free; when it moves, every cached level may be stale and is dropped —
       // and so are the ignore files, whose text is a fact about the same tree.
@@ -712,7 +715,7 @@ export class FilesPanel {
     const workspaceRowId = this.workspaceRowId();
     this.pending.update((pending) => new Set(pending).add(path));
     try {
-      const listing = await this.filesApi.files(workspaceRowId, path);
+      const listing = await this.filesApi.files(workspaceRowId, this.agentId(), path);
       this.opened.update((opened) => new Map(opened).set(path, listing));
       this.expanded.update((expanded) => new Set(expanded).add(path));
     } catch {
@@ -750,7 +753,7 @@ export class FilesPanel {
         }
         this.readingIgnores.add(source.path);
         void this.filesApi
-          .content(workspaceRowId, source.path)
+          .content(workspaceRowId, this.agentId(), source.path)
           .then((answer) => {
             if (!answer.binary && answer.content !== undefined) {
               this.ignoreText.update((text) => new Map(text).set(source.path, answer.content!));

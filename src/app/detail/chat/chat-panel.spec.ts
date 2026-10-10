@@ -70,18 +70,27 @@ const chat = (id: string, status: CommandDto['status']): CommandDto => ({
   selector: 'app-panel-host',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [ChatPanel],
-  template: `<app-chat-panel [workspaceRowId]="workspaceRowId()" [preamble]="null" />`,
+  template: `<app-chat-panel
+    [workspaceRowId]="workspaceRowId()"
+    agentId="a1"
+    workId="work-1"
+    [commandId]="commandId()"
+    [preamble]="null"
+  />`,
 })
 class PanelHost {
   readonly workspaceRowId = signal(7);
+  readonly commandId = signal<string | null>('cmd-1');
 }
 
+const DRAFT_URL = '/workspaces/api/agents/a1/prompt-draft';
+
 /**
- * The Chat tab: two modes, one tab, and no navigation between them.
+ * The Chat tab of one agent: its live chat when it runs one, else the prompt panel, which sends
+ * through the delivery door.
  *
- * **On first open this panel reads 1** — the container's command list, and that is a *shared* entry
- * the Actions history and the session tree will read too. The prompt panel's draft read is its own
- * budget, not this one's.
+ * **On first open this panel reads 1** — the container's command list, a *shared* entry the
+ * Terminal tab reads too. The prompt panel's draft read is its own budget, not this one's.
  */
 describe('ChatPanel', () => {
   let fixture: ComponentFixture<PanelHost>;
@@ -143,7 +152,7 @@ describe('ChatPanel', () => {
   it('reads the command list and nothing else of its own', async () => {
     await listing([]);
     // The prompt panel's draft read is the only other request, and it is that panel's budget.
-    const draft = http.expectOne('/workspaces/api/workspaces/7/prompt-draft');
+    const draft = http.expectOne(DRAFT_URL);
     draft.flush({ message: 'none' }, { status: 404, statusText: 'Not Found' });
     await settle();
     http.verify();
@@ -151,26 +160,41 @@ describe('ChatPanel', () => {
 
   it('shows the prompt panel when nothing is running', async () => {
     await listing([chat('old', 'EXITED')]);
-    http
-      .expectOne('/workspaces/api/workspaces/7/prompt-draft')
-      .flush({ message: 'none' }, { status: 404, statusText: 'Not Found' });
+    http.expectOne(DRAFT_URL).flush({ message: 'none' }, { status: 404, statusText: 'Not Found' });
     await settle();
 
     expect(fixture.nativeElement.querySelector('app-prompt-panel')).not.toBeNull();
     expect(sockets).toHaveLength(0);
   });
 
-  it('always carries the sentence that makes keep-mounted legible', async () => {
-    await listing([]);
-    http
-      .expectOne('/workspaces/api/workspaces/7/prompt-draft')
-      .flush({ message: 'none' }, { status: 404, statusText: 'Not Found' });
-    await settle();
+  it('says a live chat survives a tab switch', async () => {
+    await listing([chat('cmd-1', 'RUNNING')]);
+    latest().connect();
+    fixture.detectChanges();
 
     expect(text()).toContain('Switching tabs keeps the agent running');
   });
 
-  it('attaches to a session started anywhere else, and renders its replay', async () => {
+  it('points a terminal agent at the Terminal tab', async () => {
+    await listing([{ ...chat('cmd-1', 'RUNNING'), kind: 'TERMINAL' }]);
+    http.expectOne(DRAFT_URL).flush({ message: 'none' }, { status: 404, statusText: 'Not Found' });
+    await settle();
+
+    expect(sockets).toHaveLength(0);
+    expect(text()).toContain('its screen is on the Terminal tab');
+  });
+
+  it('leaves another agent’s chat alone, even when it runs', async () => {
+    await listing([chat('cmd-other', 'RUNNING'), chat('cmd-1', 'EXITED')]);
+    http.expectOne(DRAFT_URL).flush({ message: 'none' }, { status: 404, statusText: 'Not Found' });
+    await settle();
+
+    expect(sockets).toHaveLength(0);
+    expect(fixture.nativeElement.querySelector('app-prompt-panel')).not.toBeNull();
+    expect(text()).toContain('resumes it to hear it');
+  });
+
+  it('attaches to the agent’s own running chat, and renders its replay', async () => {
     await listing([chat('cmd-1', 'RUNNING')]);
 
     expect(sockets).toHaveLength(1);
@@ -214,36 +238,45 @@ describe('ChatPanel', () => {
     expect(text()).not.toContain('and a test');
   });
 
-  it('bridges the gap between a launch and the registry hearing about it', async () => {
-    // Without the bridge the panel blinks back to its empty state for a beat after every launch.
+  it('sends through the delivery door when there is no live chat, and says what became of it', async () => {
     await listing([]);
-    http
-      .expectOne('/workspaces/api/workspaces/7/prompt-draft')
-      .flush({ message: 'none' }, { status: 404, statusText: 'Not Found' });
+    http.expectOne(DRAFT_URL).flush({ message: 'none' }, { status: 404, statusText: 'Not Found' });
     await settle();
 
     const box = fixture.nativeElement.querySelector('textarea.prompt') as HTMLTextAreaElement;
     box.value = 'build it';
     box.dispatchEvent(new Event('input'));
     fixture.detectChanges();
-    press('Start the conversation');
+    press('Send to the agent');
     await settle();
 
-    const save = http.expectOne('/workspaces/api/workspaces/7/prompt-draft');
+    const save = http.expectOne(DRAFT_URL);
     save.flush({ draft: { content: save.request.body.content, updatedAt: 'T1' } });
     await settle();
 
-    http.expectOne('/workspaces/container/7/agents').flush({ command: chat('cmd-new', 'RUNNING') });
+    const delivery = http.expectOne('/workspaces/api/agent-dispatches/delivery');
+    expect(delivery.request.body).toMatchObject({ workId: 'work-1', text: 'build it' });
+    delivery.flush({ agentId: 'a1', delivered: false, launched: false, resumed: true });
     await settle();
 
-    // The registry has not answered yet, and the conversation is already on screen.
-    expect(fixture.nativeElement.querySelector('app-prompt-panel')).toBeNull();
-    expect(sockets).toHaveLength(1);
-    expect(latest().url).toContain('cmd-new');
-
-    commands().flush({ entries: [{ command: chat('cmd-new', 'RUNNING') }] });
+    http.expectOne(DRAFT_URL).flush(null, { status: 204, statusText: 'No Content' });
+    commands().flush({ entries: [] });
     await settle();
-    expect(sockets).toHaveLength(1);
+
+    expect(text()).toContain('The agent resumes to hear it');
+  });
+
+  it('draws the prompt panel for a queued agent without asking a container', async () => {
+    fixture.componentInstance.workspaceRowId.set(0);
+    fixture.componentInstance.commandId.set(null);
+    fixture.detectChanges();
+    http.expectOne(DRAFT_URL).flush({ message: 'none' }, { status: 404, statusText: 'Not Found' });
+    await settle();
+
+    http.expectNone('/workspaces/container/0/commands');
+    expect(fixture.nativeElement.querySelector('app-prompt-panel')).not.toBeNull();
+    // The rewrite runs in the agent's container, which a queued agent does not have.
+    expect(text()).not.toContain('Refine into prompt');
   });
 
   it('terminates, then refetches whether or not it worked', async () => {
@@ -270,8 +303,9 @@ describe('ChatPanel', () => {
     const first = latest();
     first.connect();
 
-    // A `commands` hint is what tells the store to look again; the relaunch is somebody else's.
+    // A `commands` hint is what tells the store to look again; the worktree read names the new id.
     TestBed.inject(WorkspaceEvents).invalidateAll();
+    fixture.componentInstance.commandId.set('cmd-2');
     fixture.detectChanges();
     commands().flush({ entries: [{ command: chat('cmd-2', 'RUNNING') }] });
     await settle();

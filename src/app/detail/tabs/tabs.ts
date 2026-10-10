@@ -1,12 +1,7 @@
 /**
- * What a tab is, and which tabs there are.
- *
- * Four tabs plus one transient, which is the answer to "ten is a lot". Sketch is gone (it does not
- * survive a reload and pasting a screenshot covers the same delivery path), Bootstrap is a section
- * inside Actions (its entire per-workspace content is three lines of status), and Telemetry is phase
- * two (real, cheap, and the one surface with no live hint to refresh it). Services and Web view are
- * gone too: the workspace container no longer supervises dev servers, so there is nothing left for
- * either tab to show.
+ * What a tab is, and which tabs an agent page has: Chat, Files and Terminal (qits-1152, D12). The
+ * Actions tab and the bootstrap chain are gone; so are the editor and the Agents tab, whose terminal
+ * is now the Terminal tab.
  */
 
 /** How loud a tab's label dot is. */
@@ -42,19 +37,13 @@ export interface TabDef {
 export const STARTING_SLUG = 'starting';
 
 /**
- * The four durable tabs, in their default order.
- *
- * The order is what a fresh page opens with; dragging rewrites it for the session and nothing else.
- * Per-browser persistence was dropped deliberately: it buys per-device ergonomics on a row of four
- * and costs a stored-order migration every time a tab is added or renamed — which this
- * reimplementation is doing on day one. The asymmetry is worth keeping either way: tab order is
- * device ergonomics, and the prompt draft is work product and lives on the server.
+ * The durable tabs, in their default order. Dragging rewrites the order for the session only: tab
+ * order is device ergonomics, while the prompt draft is work product and lives on the server.
  */
 export const DURABLE_TABS: readonly TabDef[] = [
   { slug: 'chat', label: 'Chat', inUrl: true },
   { slug: 'files', label: 'Files', inUrl: true },
-  { slug: 'actions', label: 'Actions', inUrl: true },
-  { slug: 'agents', label: 'Agents', inUrl: true },
+  { slug: 'terminal', label: 'Terminal', inUrl: true },
 ];
 
 /** The default selection: the first durable tab. A bare URL means "no tab pinned", not "chat". */

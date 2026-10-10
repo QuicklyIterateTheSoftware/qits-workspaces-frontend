@@ -10,15 +10,14 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { Router } from '@angular/router';
 import { QitsButton } from '@qits/ui-components';
-import { CommandsApi, type CommandDto } from '../../api/commands-api';
+import { CommandsApi } from '../../api/commands-api';
+import type { AgentDeliveryDto } from '../../api/dto';
 import { PromptDraftApi } from '../../api/prompt-draft-api';
 import { SpeechApi } from '../../api/speech-api';
+import { WorkspaceAgentsApi } from '../../api/workspace-agents-api';
 import { WorkspaceEvents } from '../../api/workspace-events';
 import { relativeSince } from '../../ui/format';
-import { AgentSignIn, isSignInTerminal } from '../agents/agent-sign-in';
-import { SignInNotice } from '../agents/sign-in-notice';
 import { FileNavigation } from '../files/file-navigation';
 import { describeError } from '../../ui/loadable';
 import { LevelMeter } from './level-meter';
@@ -45,7 +44,7 @@ type SaveState = 'clean' | 'pending' | 'saving' | 'dirty';
  *
  * ## What it loads
  *
- * **One request**: `GET /workspaces/api/workspaces/{id}/prompt-draft`. A 404 means nothing was ever
+ * **One request**: `GET /workspaces/api/agents/{id}/prompt-draft`. A 404 means nothing was ever
  * composed here, which is a different screen from an empty one — it is why the restored-draft hint
  * can be honest.
  *
@@ -83,49 +82,44 @@ type SaveState = 'clean' | 'pending' | 'saving' | 'dirty';
  * gives, which is the whole reason the save's response is used rather than discarded. A hint that is
  * *not* our echo is another device, and it is adopted only when there is nothing local to lose.
  *
- * ## Flush-then-launch, and a failed flush aborts
+ * ## Flush, then send; a failed flush aborts
  *
- * The draft is written synchronously before the launch, and a failure stops the launch with a
- * visible error. Two reasons to keep this even now, while the prompt is delivered inline and the
- * race it defends against is temporarily absent: the moment image attachments land, delivery
- * inverts back to *fetch* and the discipline has to already be there; and a draft that failed to
- * save is work about to be lost, which is worth aborting for on its own. **Launching with the wrong
- * prompt is worse than not launching.**
- *
- * ## Not signed in is said here, and answered in the Agents tab
- *
- * A launch refused because nobody has signed the harness in is not an error line: it has a next step,
- * and that step is a terminal. So the refusal goes to {@link ../agents/agent-sign-in#AgentSignIn},
- * the notice offers to open the sign-in terminal, and pressing it jumps to the Agents tab — which is
- * where this page renders a PTY, and where the same notice is already waiting. What this replaces is
- * the silence: the launch used to *become* that terminal, and this panel handed the caller a
- * `TERMINAL` command to attach a chat socket to.
+ * The draft is written before the turn is sent, and a failed save stops the send with a visible
+ * error: a draft that did not save is work about to be lost. The turn goes through the service's
+ * delivery door (`POST /workspaces/api/agent-dispatches/delivery`), which resumes a yielded agent
+ * to hear it — the browser never starts a harness itself (qits-1152). A delivered turn empties the
+ * box and the draft.
  */
 @Component({
   selector: 'app-prompt-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [LevelMeter, QitsButton, SignInNotice],
+  imports: [LevelMeter, QitsButton],
   templateUrl: './prompt-panel.html',
   styleUrl: './prompt-panel.css',
 })
 export class PromptPanel {
   private readonly drafts = inject(PromptDraftApi);
   private readonly commandsApi = inject(CommandsApi);
+  private readonly agents = inject(WorkspaceAgentsApi);
   private readonly speech = inject(SpeechApi);
   private readonly events = inject(WorkspaceEvents);
   protected readonly picked = inject(PickedContext);
   private readonly nav = inject(FileNavigation);
-  protected readonly signIn = inject(AgentSignIn);
-  private readonly router = inject(Router);
 
-  /** Which workspace's container to launch in, and whose draft to hold. */
-  readonly workspaceRowId = input.required<number>();
+  /** The agent's workspace, for the prompt rewrite. 0 while the agent is queued: no rewrite then. */
+  readonly workspaceRowId = input(0);
 
-  /** The workspace's stated goal. Host-side metadata the refinement request has to carry. */
+  /** Whose draft this is. */
+  readonly agentId = input.required<string>();
+
+  /** The agent's work item, which the delivery door is keyed by. */
+  readonly workId = input.required<string>();
+
+  /** What the work is about, for the rewrite. Host-side metadata the request has to carry. */
   readonly preamble = input<string | null>(null);
 
-  /** A chat was launched. The panel does not swap itself; the tab decides what it shows. */
-  readonly launched = output<CommandDto>();
+  /** A turn was sent. The chat panel says what became of it. */
+  readonly sent = output<AgentDeliveryDto>();
 
   /** The prompt box: the draft, and the only thing that is saved, flushed or launched. */
   protected readonly text = signal('');
@@ -179,19 +173,19 @@ export class PromptPanel {
 
   /** What was last written, so the `prompt-draft` hint can tell our own echo from someone else's. */
   private lastWrittenAt: string | null = null;
-  private loadedFor = 0;
+  private loadedFor = '';
   private seenHint = -1;
 
   private readonly draftHints = this.events.invalidations('prompt-draft');
 
   constructor() {
     effect(() => {
-      const workspaceRowId = this.workspaceRowId();
+      const agentId = this.agentId();
       untracked(() => {
-        this.picked.use(workspaceRowId);
-        if (this.loadedFor !== workspaceRowId) {
-          this.loadedFor = workspaceRowId;
-          void this.restore(workspaceRowId);
+        this.picked.use(agentId);
+        if (this.loadedFor !== agentId) {
+          this.loadedFor = agentId;
+          void this.restore(agentId);
         }
       });
     });
@@ -209,7 +203,7 @@ export class PromptPanel {
           return;
         }
         this.seenHint = hint;
-        void this.reconcile(this.workspaceRowId());
+        void this.reconcile(this.agentId());
       });
     });
 
@@ -237,6 +231,9 @@ export class PromptPanel {
   protected readonly canPromote = computed(
     () => this.transcript().trim().length > 0 && !this.refining(),
   );
+
+  /** The rewrite runs in the agent's container, so a queued agent has none to ask. */
+  protected readonly canRefine = computed(() => this.workspaceRowId() > 0);
 
   protected label(reference: CodeReference): string {
     return referenceLabel(reference);
@@ -389,13 +386,13 @@ export class PromptPanel {
 
   // ---- the draft --------------------------------------------------------------------------------
 
-  private async restore(workspaceRowId: number): Promise<void> {
-    if (workspaceRowId <= 0) {
+  private async restore(agentId: string): Promise<void> {
+    if (!agentId) {
       return;
     }
     try {
-      const draft = await this.drafts.draft(workspaceRowId);
-      if (this.workspaceRowId() !== workspaceRowId || !draft) {
+      const draft = await this.drafts.draft(agentId);
+      if (this.agentId() !== agentId || !draft) {
         return;
       }
       const composition = parseComposition(draft.content);
@@ -418,12 +415,12 @@ export class PromptPanel {
    * if there is nothing local it would throw away. Anything else is a merge, and a text box is the
    * wrong place to invent one.
    */
-  private async reconcile(workspaceRowId: number): Promise<void> {
-    if (workspaceRowId <= 0 || this.save() !== 'clean') {
+  private async reconcile(agentId: string): Promise<void> {
+    if (!agentId || this.save() !== 'clean') {
       return;
     }
     try {
-      const draft = await this.drafts.draft(workspaceRowId);
+      const draft = await this.drafts.draft(agentId);
       if (!draft || draft.updatedAt === this.lastWrittenAt || this.save() !== 'clean') {
         return;
       }
@@ -454,12 +451,12 @@ export class PromptPanel {
 
   private async write(): Promise<void> {
     this.clearTimer();
-    const workspaceRowId = this.workspaceRowId();
+    const agentId = this.agentId();
     const composition = this.composition();
     this.save.set('saving');
     try {
       const draft = await this.drafts.save(
-        workspaceRowId,
+        agentId,
         JSON.stringify(composition),
         serializePrompt(composition),
       );
@@ -484,7 +481,7 @@ export class PromptPanel {
     this.restoredAt.set(null);
     this.save.set('clean');
     try {
-      await this.drafts.discard(this.workspaceRowId());
+      await this.drafts.discard(this.agentId());
       this.lastWrittenAt = null;
       this.saveProblem.set(null);
     } catch (error) {
@@ -492,15 +489,9 @@ export class PromptPanel {
     }
   }
 
-  // ---- launching --------------------------------------------------------------------------------
+  // ---- sending ----------------------------------------------------------------------------------
 
-  /**
-   * Flush, then launch as a chat.
-   *
-   * The flush is awaited and its failure is fatal to the launch. `deliverTaskPrompt` stays false and
-   * the composed prompt rides `initialContext`: text and code references are all text, and the fetch
-   * path exists only for images, which are phase two.
-   */
+  /** Flush, then send the composed prompt as the agent's next turn. */
   protected async launchChat(): Promise<void> {
     if (!this.canLaunch()) {
       return;
@@ -511,55 +502,37 @@ export class PromptPanel {
       await this.flush();
       if (this.save() === 'dirty') {
         this.launchProblem.set(
-          'The draft did not save, so nothing was launched — the agent would have read the wrong prompt. Try again.',
+          'The draft did not save, so nothing was sent — the agent would have read the wrong prompt. Try again.',
         );
         return;
       }
-      const command = await this.commandsApi.launchAgent(this.workspaceRowId(), {
-        scope: 'REPOSITORY',
-        // One line of body, and the reason it matters: this request is **byte-identical to the
-        // refining route's** in qits-projects-frontend — same scope, same mode, same composed
-        // `initialContext` — so the workspace daemon serving both cannot tell an epic's chat from an
-        // ad-hoc workspace's, and neither can anything downstream. Until both frontends name their
-        // own surface, one configuration cannot be given to an epic's chat without giving it to
-        // every ad-hoc workspace chat as well.
-        surface: 'workspace.chat',
-        mode: 'CHAT',
-        initialContext: this.composed(),
-        deliverTaskPrompt: false,
-      });
-      if (isSignInTerminal(command)) {
-        // A daemon that still swaps the session for a login REPL. It is a `TERMINAL`, so attaching
-        // this tab's conversation to it would attach a chat socket to a PTY and show nothing; the
-        // notice goes up instead, and the terminal opens on a press.
-        this.signIn.adopt(command);
+      const delivery = await this.agents.deliver(this.workId(), this.composed());
+      if (delivery.agentId === null) {
+        this.launchProblem.set('No agent works on this item any more, so nothing was sent.');
         return;
       }
-      this.launched.emit(command);
+      this.sent.emit(delivery);
+      await this.clearAfterSend();
     } catch (error) {
-      // Not signed in has a next step, so it is the sign-in surface's rather than an error line.
-      if (!this.signIn.refuse(error)) {
-        this.launchProblem.set(`The agent did not start — ${describeError(error)}.`);
-      }
+      this.launchProblem.set(`The message was not sent — ${describeError(error)}.`);
     } finally {
       this.launching.set(false);
     }
   }
 
-  /**
-   * The sign-in terminal is open — go to where it is drawn.
-   *
-   * A URL write, like every other cross-tab jump on this page, so a press and a pasted link take the
-   * same path. It runs *after* the launch has answered: a jump to a tab with nothing in it would be
-   * the same unexplained relocation this whole surface exists to end.
-   */
-  protected goToAgents(): void {
-    // Written off the current URL rather than relative to an `ActivatedRoute`, the way the file
-    // browser's jumps are: this panel is mounted deep inside a tab host, and the tab is a query
-    // parameter on the route above it, so the whole write is "keep the URL, set `tab`".
-    const tree = this.router.parseUrl(this.router.url);
-    tree.queryParams = { ...tree.queryParams, tab: 'agents' };
-    void this.router.navigateByUrl(tree);
+  /** The prompt has been said: empty the box and the stored draft. */
+  private async clearAfterSend(): Promise<void> {
+    this.clearTimer();
+    this.text.set('');
+    this.picked.clear();
+    this.restoredAt.set(null);
+    this.save.set('clean');
+    try {
+      await this.drafts.discard(this.agentId());
+      this.lastWrittenAt = null;
+    } catch {
+      // The turn is sent; a stale draft left behind is shown as restored next time, never lost work.
+    }
   }
 
   private clearTimer(): void {

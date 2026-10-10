@@ -1,144 +1,146 @@
-@if (mounted()) {
+@if (!missing()) {
+  <!-- A 404 is not a failure here: it is a resolved workspace, drawn below. -->
   <app-async
-    [state]="repository()"
-    loadingLabel="Loading the repository"
-    errorLabel="Could not load the repository"
-    (retry)="reload()"
-  />
-
-  <app-async
-    [state]="workspaces()"
-    loadingLabel="Loading workspace"
+    [state]="workspaceState()"
+    loadingLabel="Loading the workspace"
     errorLabel="Could not load the workspace"
     (retry)="reload()"
   />
+}
 
-  @if (workspace(); as ws) {
-    <header class="head">
-      <h1>{{ ws.workspaceId }}</h1>
-      <p class="meta">
-        <code>{{ ws.branch ?? ws.workspaceId }}</code>
-        @if (ws.parent) {
-          <span class="sep">·</span>
-          <span
-            >forked from <code>{{ ws.parent }}</code></span
-          >
-        }
-      </p>
-      @if (subject(); as ref) {
-        <p class="subject">
-          @if (subjectHref(); as href) {
-            <a [href]="href">{{ subjectLabel() }}</a>
-          } @else {
-            <span>{{ subjectLabel() }}</span>
-          }
-        </p>
-      } @else if (ws.preamble) {
-        <p class="preamble">{{ ws.preamble }}</p>
+@if (workspace(); as ws) {
+  <header class="head">
+    <h1>Workspace {{ ws.workspaceId }}</h1>
+    <p class="meta">
+      @if (repositoryName()) {
+        <span
+          >wrapper <code>{{ repositoryName() }}</code></span
+        >
+        <span class="sep">·</span>
       }
-    </header>
+      @if (ws.placement === 'RUNNER') {
+        <span>{{ ws.runner ? 'on runner ' + ws.runner.name : 'waiting for a runner' }}</span>
+      } @else {
+        <span>on the platform host</span>
+      }
+      @if (ws.admin) {
+        <span class="sep">·</span>
+        <qits-badge label="docker socket" tone="warning" />
+      }
+    </p>
+    <p class="explain">
+      A workspace is a slot that hosts agents. It runs one agent's harness at a time; an agent that
+      waits yields the slot to the next one.
+    </p>
+  </header>
 
-    <app-status-strip
-      [workspace]="ws"
-      [mainBranch]="mainBranch()"
-      [reachability]="reachability()"
-      [live]="live()"
-      (changed)="onChanged()"
-      (started)="onStarted($event)"
-      (merged)="onMerged($event)"
+  <app-status-strip
+    [workspace]="ws"
+    [reachability]="reachability()"
+    [live]="live()"
+    (changed)="onChanged()"
+    (started)="onStarted($event)"
+  />
+
+  @if (shownProcessId(); as processId) {
+    <section class="starting" aria-label="Starting">
+      <h2>Starting</h2>
+      <app-starting-panel [processId]="processId" (settled)="onSettled()" />
+    </section>
+  }
+
+  <section class="agents" aria-labelledby="agents-title">
+    <h2 id="agents-title">Agents</h2>
+    <app-async
+      [state]="agents()"
+      loadingLabel="Loading the agents"
+      errorLabel="Could not load the agents"
+      (retry)="loadAgents(workspaceId())"
     />
-
-    @if (landed().length > 0) {
-      <section class="landed" aria-label="What landed from this page">
-        <ul>
-          @for (record of landed(); track record.commitSha) {
-            <li>
-              <code>{{ record.branch }}</code> → <code>{{ record.targetBranch }}</code
-              >, merge commit <code>{{ record.commitSha }}</code>
+    @if (agents().kind === 'ready') {
+      @if (agentList().length === 0) {
+        <app-empty
+          message="No agent is in this workspace. The service removes an empty workspace."
+        />
+      } @else {
+        <ul class="agent-list">
+          @for (agent of agentList(); track agent.agentId) {
+            <li class="agent">
+              <div class="agent-head">
+                <a class="agent-name" [routerLink]="agentRoute(agent)">{{ label(agent) }}</a>
+                @if (agent.entityTitle) {
+                  <span class="title">{{ agent.entityTitle }}</span>
+                }
+              </div>
+              <p class="facts">
+                <qits-badge [label]="agent.state.toLowerCase()" [tone]="stateTone(agent)" />
+                <span>{{ runState(agent) }}</span>
+                @if (activity(agent); as doing) {
+                  <span class="sep">·</span>
+                  <span>{{ doing }}</span>
+                }
+                @if (agent.admin) {
+                  <span class="sep">·</span>
+                  <span>admin</span>
+                }
+                @if (agent.harness) {
+                  <span class="sep">·</span>
+                  <span>{{ agent.harness.toLowerCase() }}</span>
+                }
+              </p>
+              <p class="branches">
+                <code>{{ agent.wrapperBranch }}</code>
+                @for (branch of agent.branches; track branch.repositoryId + branch.branch) {
+                  @if (branch.branch !== agent.wrapperBranch) {
+                    <code>{{ branch.branch }}</code>
+                  }
+                }
+              </p>
+              @if (workItemHref(agent); as href) {
+                <a class="work-item" [href]="href">Open {{ label(agent) }} in Projects</a>
+              }
             </li>
           }
         </ul>
-      </section>
+      }
     }
-
-    <app-activity-bar
-      [workspaces]="workspaceList()"
-      [currentId]="ws.id"
-      (open)="openWorkspace($event)"
+  </section>
+} @else if (missing()) {
+  <section class="resolved" aria-label="Resolved workspace">
+    <app-async
+      [state]="history()"
+      loadingLabel="Loading the history record"
+      errorLabel="Could not load the history record"
+      (retry)="loadHistory(workspaceId())"
     />
 
-    <app-tab-host
-      [tabs]="tabs()"
-      [selected]="selected()"
-      label="Workspace"
-      (selectTab)="chooseTab($event)"
-    >
-      @if (shownProcessId(); as processId) {
-        <ng-template appTabPanel="starting">
-          <app-starting-panel [processId]="processId" (settled)="onSettled()" />
-        </ng-template>
-      }
-      @for (tab of durableTabs; track tab.slug) {
-        <ng-template [appTabPanel]="tab.slug">
-          @if (tab.slug === 'chat') {
-            <app-chat-panel [workspaceRowId]="ws.id" [preamble]="rewriteContext()" />
-          } @else if (tab.slug === 'files') {
-            <app-files-panel [workspaceRowId]="ws.id" [visible]="selected() === 'files'" />
-          } @else if (tab.slug === 'actions') {
-            <app-actions-panel
-              [workspaceRowId]="ws.id"
-              [runtimeStatus]="ws.runtimeStatus"
-              [daemonConnected]="ws.daemonConnectedAt !== null"
-              [visible]="selected() === 'actions'"
-            />
-          } @else if (tab.slug === 'agents') {
-            <app-agents-panel
-              [workspaceRowId]="ws.id"
-              [activity]="ws.agentActivity"
-              [visible]="selected() === 'agents'"
-            />
-          } @else {
-            <app-panel-placeholder [title]="tab.label" [note]="panelNote(tab.slug)" />
+    @if (history(); as state) {
+      @if (state.kind === 'ready') {
+        <h1>{{ state.value.workspaceId }}</h1>
+        <p class="explain">
+          This workspace is {{ state.value.status.toLowerCase() }} — the work is finished, its
+          container is gone, and there is nothing live left to show. What remains is its history
+          record.
+        </p>
+        @if (state.value.result) {
+          <p class="result">{{ state.value.result }}</p>
+        }
+        <ol class="events">
+          @for (event of state.value.events; track event.at) {
+            <li>
+              <span class="type">{{ event.type.toLowerCase() }}</span>
+              <span class="at">{{ event.at }}</span>
+              @if (event.commit) {
+                <code>{{ event.commit }}</code>
+              }
+              @if (event.note) {
+                <span class="note">{{ event.note }}</span>
+              }
+            </li>
           }
-        </ng-template>
-      }
-    </app-tab-host>
-  } @else if (missing()) {
-    <section class="resolved" aria-label="Resolved workspace">
-      <app-async
-        [state]="history()"
-        loadingLabel="Loading the history record"
-        errorLabel="Could not load the history record"
-        (retry)="loadHistory(workspaceId())"
-      />
+        </ol>
 
-      @if (history(); as state) {
-        @if (state.kind === 'ready') {
-          <h1>{{ state.value.workspaceId }}</h1>
-          <p class="explain">
-            This workspace is {{ state.value.status.toLowerCase() }} — the work is finished, its
-            container is gone, and there is nothing live left to show. What remains is its history
-            record.
-          </p>
-          @if (state.value.result) {
-            <p class="result">{{ state.value.result }}</p>
-          }
-          <ol class="events">
-            @for (event of state.value.events; track event.at) {
-              <li>
-                <span class="type">{{ event.type.toLowerCase() }}</span>
-                <span class="at">{{ event.at }}</span>
-                @if (event.commit) {
-                  <code>{{ event.commit }}</code>
-                }
-                @if (event.note) {
-                  <span class="note">{{ event.note }}</span>
-                }
-              </li>
-            }
-          </ol>
-
-          <!--
+        <!--
             What actually happened in this workspace.
 
             The event timeline above says what became of the *branch*; this says what the work was.
@@ -156,20 +158,20 @@
             own, because the question a reader has is usually "which of these was it", and an
             in-place open keeps the other candidates a scroll away.
           -->
-          <section class="agent-sessions" aria-label="Agent sessions">
-            <h2>Agent sessions</h2>
+        <section class="agent-sessions" aria-label="Agent sessions">
+          <h2>Agent sessions</h2>
 
-            <app-async
-              [state]="sessions()"
-              loadingLabel="Loading the agent sessions"
-              errorLabel="Could not load the agent sessions"
-              (retry)="loadSessions(workspaceId())"
-            />
+          <app-async
+            [state]="sessions()"
+            loadingLabel="Loading the agent sessions"
+            errorLabel="Could not load the agent sessions"
+            (retry)="loadSessions(workspaceId())"
+          />
 
-            @if (sessions(); as list) {
-              @if (list.kind === 'ready') {
-                @if (list.value.length === 0) {
-                  <!--
+          @if (sessions(); as list) {
+            @if (list.kind === 'ready') {
+              @if (list.value.length === 0) {
+                <!--
                     Carefully not "there were no sessions".
 
                     An empty list is the *normal* answer here for now, and it does not mean what it
@@ -180,94 +182,93 @@
                     rest of it. So the sentence says what is actually known — that none could be read
                     — and leaves whether any ran an open question, which it is.
                   -->
-                  @if (runnerPlaced()) {
-                    <app-empty
-                      class="runner-transcripts"
-                      message="Archived transcripts are not available for runner-placed workspaces: the sessions ran on the runner's node, which the service does not read."
-                    />
-                  } @else {
-                    <app-empty
-                      message="No agent sessions could be read for this workspace. That is not the same as none having run: a session becomes readable only once its transcript is somewhere the service can reach."
-                    />
-                  }
+                @if (runnerPlaced()) {
+                  <app-empty
+                    class="runner-transcripts"
+                    message="Archived transcripts are not available for runner-placed workspaces: the sessions ran on the runner's node, which the service does not read."
+                  />
                 } @else {
-                  <ul class="sessions">
-                    @for (session of list.value; track session.sessionId) {
-                      <li
-                        class="session"
-                        [class.open]="session.sessionId === selectedSession()"
-                        [attr.aria-label]="'Agent session started ' + session.startedAt"
+                  <app-empty
+                    message="No agent sessions could be read for this workspace. That is not the same as none having run: a session becomes readable only once its transcript is somewhere the service can reach."
+                  />
+                }
+              } @else {
+                <ul class="sessions">
+                  @for (session of list.value; track session.sessionId) {
+                    <li
+                      class="session"
+                      [class.open]="session.sessionId === selectedSession()"
+                      [attr.aria-label]="'Agent session started ' + session.startedAt"
+                    >
+                      <button
+                        type="button"
+                        class="pick"
+                        [attr.aria-expanded]="session.sessionId === selectedSession()"
+                        (click)="chooseSession(session.sessionId)"
                       >
-                        <button
-                          type="button"
-                          class="pick"
-                          [attr.aria-expanded]="session.sessionId === selectedSession()"
-                          (click)="chooseSession(session.sessionId)"
+                        <span class="ran"
+                          >{{ session.startedAt }} → {{ session.endedAt ?? none }}</span
                         >
-                          <span class="ran">{{ session.startedAt }} → {{ session.endedAt ?? none }}</span>
-                          <span class="said">{{ session.messageCount }} messages</span>
-                        </button>
+                        <span class="said">{{ session.messageCount }} messages</span>
+                      </button>
 
-                        @if (session.subagents.length > 0) {
-                          <ul class="subagents">
-                            @for (subagent of session.subagents; track subagent.agentId) {
-                              <li>
-                                <span class="kind">{{ subagent.agentType ?? 'Sub-agent' }}</span>
-                                @if (subagent.description) {
-                                  <span class="what">{{ subagent.description }}</span>
-                                }
-                                <span class="said">{{ subagent.messageCount }} messages</span>
-                              </li>
-                            }
-                          </ul>
-                        }
+                      @if (session.subagents.length > 0) {
+                        <ul class="subagents">
+                          @for (subagent of session.subagents; track subagent.agentId) {
+                            <li>
+                              <span class="kind">{{ subagent.agentType ?? 'Sub-agent' }}</span>
+                              @if (subagent.description) {
+                                <span class="what">{{ subagent.description }}</span>
+                              }
+                              <span class="said">{{ subagent.messageCount }} messages</span>
+                            </li>
+                          }
+                        </ul>
+                      }
 
-                        @if (session.sessionId === selectedSession()) {
-                          <app-async
-                            [state]="transcript()"
-                            loadingLabel="Loading the transcript"
-                            errorLabel="Could not load the transcript"
-                            (retry)="reloadTranscript()"
-                          />
-                          @if (transcript(); as replay) {
-                            @if (replay.kind === 'ready') {
-                              @if (replay.value.length === 0) {
-                                <!--
+                      @if (session.sessionId === selectedSession()) {
+                        <app-async
+                          [state]="transcript()"
+                          loadingLabel="Loading the transcript"
+                          errorLabel="Could not load the transcript"
+                          (retry)="reloadTranscript()"
+                        />
+                        @if (transcript(); as replay) {
+                          @if (replay.kind === 'ready') {
+                            @if (replay.value.length === 0) {
+                              <!--
                                   Same restraint as the empty list above: the session is indexed, so
                                   it ran, and all that is known here is that no lines came back for
                                   it.
                                 -->
-                                <app-empty
-                                  message="No lines could be read for this session — its transcript is not where the service can reach it."
-                                />
-                              } @else {
-                                <!--
+                              <app-empty
+                                message="No lines could be read for this session — its transcript is not where the service can reach it."
+                              />
+                            } @else {
+                              <!--
                                   The live chat's own renderer, unchanged and given the same line
                                   shape it is given live. Nothing here re-implements a conversation:
                                   a record that drew one differently from the live view would be a
                                   second, quietly diverging opinion about what an agent said.
                                 -->
-                                <div class="replay">
-                                  <app-conversation [items]="conversation().items" />
-                                </div>
-                              }
+                              <div class="replay">
+                                <app-conversation [items]="conversation().items" />
+                              </div>
                             }
                           }
                         }
-                      </li>
-                    }
-                  </ul>
-                }
+                      }
+                    </li>
+                  }
+                </ul>
               }
             }
-          </section>
-        } @else if (state.kind === 'error' && state.status === 404) {
-          <h1>No such workspace here</h1>
-          <p class="explain">
-            Nothing in <code>{{ repositoryId() }}</code> has that id, live or resolved.
-          </p>
-        }
+          }
+        </section>
+      } @else if (state.kind === 'error' && state.status === 404) {
+        <h1>No such workspace here</h1>
+        <p class="explain">No workspace has that id, live or resolved.</p>
       }
-    </section>
-  }
+    }
+  </section>
 }

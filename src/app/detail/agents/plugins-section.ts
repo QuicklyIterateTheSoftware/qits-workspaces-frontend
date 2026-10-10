@@ -195,6 +195,9 @@ export class PluginsSection {
 
   readonly workspaceRowId = input.required<number>();
 
+  /** The agent whose worktree the recommendations are read from. */
+  readonly agentId = input.required<string>();
+
   protected readonly state = signal<Loadable<readonly InstalledPluginDto[]>>(IDLE);
   protected readonly pending = signal<string | null>(null);
   protected readonly problem = signal<string | null>(null);
@@ -207,7 +210,7 @@ export class PluginsSection {
       if (workspaceRowId > 0 && workspaceRowId !== this.loadedFor) {
         this.loadedFor = workspaceRowId;
         void this.load(workspaceRowId);
-        void this.detection.ensure(workspaceRowId);
+        void this.detection.ensure({ workspaceRowId, agentId: this.agentId() });
       }
     });
   }

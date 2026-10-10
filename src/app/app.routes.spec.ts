@@ -7,8 +7,8 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import { QITS_CATEGORIES, provideQitsRepositoryList, provideQitsScope } from '@qits/ui-components';
 import { EVENT_SOURCE_FACTORY, type EventSourceLike } from './api/event-source';
 import { isRepositoryAddress, routes } from './app.routes';
+import { AgentPage } from './detail/agent-page';
 import { WorkspaceDetailPage } from './detail/workspace-detail-page';
-import { EditorPage } from './editor/editor-page';
 import { NotFound } from './not-found/not-found';
 import { WorkspacesPage } from './overview/workspaces-page';
 import { RunnersPage } from './runners/runners-page';
@@ -73,17 +73,17 @@ describe('routes', () => {
     expect(await activated('/qits/services/qits-ci')).toBe(WorkspacesPage);
   });
 
-  it('serves the editor in all three spellings', async () => {
-    // One page per project, and the project is the scope rather than a parameter — so the same
-    // component answers bare, under a project and under a repository.
-    expect(await activated('/editor')).toBe(EditorPage);
-    expect(await activated('/qits/editor')).toBe(EditorPage);
-    expect(await activated('/qits/qits-ci/qits-ci-service/editor')).toBe(EditorPage);
+  it('serves an agent in all three spellings', async () => {
+    expect(await activated('/agents/a1')).toBe(AgentPage);
+    expect(await activated('/qits/agents/a1')).toBe(AgentPage);
+    expect(await activated('/qits/qits-ci/qits-ci-service/agents/a1')).toBe(AgentPage);
   });
 
-  it('never reads its own `editor` segment as a project', async () => {
-    // `/editor/qits-ci/qits-ci-service` would otherwise be a project called `editor`.
-    expect(await activated('/editor/qits-ci/qits-ci-service')).toBe(NotFound);
+  it('never reads its own `agents` segment as a project', async () => {
+    const segments = ['agents', 'qits-ci', 'qits-ci-service'].map(
+      (path) => new UrlSegment(path, {}),
+    );
+    expect(isRepositoryAddress({} as Route, segments)).toBe(false);
   });
 
   it('serves the runners page bare and under a project', async () => {

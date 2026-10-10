@@ -54,29 +54,8 @@ describe('CommandsApi', () => {
     expect(await answer).toEqual([]);
   });
 
-  it('launches an agent as a chat, inline, and never through the missing MCP tool', async () => {
-    // `deliverTaskPrompt` sends the agent to fetch `taskPrompt`, which is not implemented anywhere
-    // on the platform — the agent would be told to call something that does not exist.
-    const answer = api.launchAgent(7, {
-      scope: 'REPOSITORY',
-      surface: 'workspace.chat',
-      mode: 'CHAT',
-      initialContext: 'add a health check',
-      deliverTaskPrompt: false,
-    });
-    const request = http.expectOne('/workspaces/container/7/agents');
-    request.flush({ command: COMMAND });
-
-    // The surface rides the body verbatim. It is what tells this request apart from the refining
-    // route's, which is byte-identical in every other field and reaches the same daemon.
-    expect(request.request.body).toEqual({
-      scope: 'REPOSITORY',
-      surface: 'workspace.chat',
-      mode: 'CHAT',
-      initialContext: 'add a health check',
-      deliverTaskPrompt: false,
-    });
-    expect(await answer).toEqual(COMMAND);
+  it('has no launch call: the service starts every agent', () => {
+    expect('launchAgent' in api).toBe(false);
   });
 
   it('opens the sign-in terminal as an ordinary launch, naming the harness that needs it', async () => {

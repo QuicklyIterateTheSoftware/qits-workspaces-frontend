@@ -50,9 +50,11 @@
 
   @if (canPromote()) {
     <div class="promote">
-      <qits-button variant="secondary" size="sm" [busy]="refining()" (pressed)="refine()">
-        Refine into prompt
-      </qits-button>
+      @if (canRefine()) {
+        <qits-button variant="secondary" size="sm" [busy]="refining()" (pressed)="refine()">
+          Refine into prompt
+        </qits-button>
+      }
       <qits-button variant="ghost" size="sm" (pressed)="useAsIs()">
         Use transcript as-is
       </qits-button>
@@ -72,7 +74,7 @@
   <textarea
     class="prompt"
     rows="8"
-    placeholder="Tell the agent what to change in this workspace."
+    placeholder="Tell the agent what to do next."
     [value]="text()"
     (input)="onType($any($event.target).value)"
   ></textarea>
@@ -121,7 +123,7 @@
     [busy]="launching()"
     (pressed)="launchChat()"
   >
-    Start the conversation
+    Send to the agent
   </qits-button>
   <span class="state">{{ saveLabel() }}</span>
 </footer>
@@ -133,14 +135,3 @@
 @if (launchProblem(); as problem) {
   <p class="problem" role="alert">⚠ {{ problem }}</p>
 }
-
-<!--
-  Not signed in is not an error line: it has a next step, and the step is a terminal. The Agents tab
-  is where this page draws a PTY, so opening it here is a launch and a jump.
--->
-<app-sign-in-notice [workspaceRowId]="workspaceRowId()" (opened)="goToAgents()" />
-
-<p class="note deferred">
-  The full agent TUI launches from the Agents tab, which is where a terminal session is rendered and
-  resumed.
-</p>

@@ -104,8 +104,8 @@ export interface DetectionDto {
 }
 
 /**
- * The working tree and what the daemon has detected in it — the two reads the file browser is built
- * from.
+ * One agent's worktree and what the daemon has detected in it — the two reads the file browser is
+ * built from. Every path is relative to the agent's wrapper worktree (qits-1152).
  *
  * Written by hand against `daemons/qits-workspace-daemon/docs/openapi.yml`, which is itself
  * hand-written and carries one acceptance rule: every field named in it is asserted as a literal
@@ -128,8 +128,12 @@ export class FilesApi {
    * "the root", but sending `path=` on the first load would make the request that fetches everything
    * look like a request for a directory called nothing.
    */
-  async files(workspaceRowId: number, path?: string): Promise<FileListingDto> {
-    return this.daemon.get<FileListingDto>(workspaceRowId, '/files', path ? { path } : undefined);
+  async files(workspaceRowId: number, agentId: string, path?: string): Promise<FileListingDto> {
+    return this.daemon.get<FileListingDto>(
+      workspaceRowId,
+      `${agentRoot(agentId)}/files`,
+      path ? { path } : undefined,
+    );
   }
 
   /**
@@ -139,21 +143,28 @@ export class FilesApi {
    * the whole point of it is that the two can be compared: a detection is applied only while its
    * token matches the tree on screen. See `applyDetection` in the tree model for the rule.
    */
-  async detection(workspaceRowId: number): Promise<DetectionDto> {
-    return this.daemon.get<DetectionDto>(workspaceRowId, '/detection');
+  async detection(workspaceRowId: number, agentId: string): Promise<DetectionDto> {
+    return this.daemon.get<DetectionDto>(workspaceRowId, `${agentRoot(agentId)}/detection`);
   }
 
   /**
    * One file's contents.
    *
-   * **It consults git for nothing**, so it reads any regular file inside the workspace root, tracked
+   * **It consults git for nothing**, so it reads any regular file inside the agent's worktree, tracked
    * or not. That is what makes the viewer's "open at an exact line range" entry point work for a file
    * that is **not in the tree at all** — a log is usually ignored, and anchoring an event in one is
    * the whole reason that entry point exists.
    *
    * `path` is required here, unlike on `/files`, where its absence means the root.
    */
-  async content(workspaceRowId: number, path: string): Promise<FileContentDto> {
-    return this.daemon.get<FileContentDto>(workspaceRowId, '/files/content', { path });
+  async content(workspaceRowId: number, agentId: string, path: string): Promise<FileContentDto> {
+    return this.daemon.get<FileContentDto>(workspaceRowId, `${agentRoot(agentId)}/files/content`, {
+      path,
+    });
   }
+}
+
+/** Where one agent's reads live on the daemon. Its root is the agent's wrapper worktree. */
+export function agentRoot(agentId: string): string {
+  return `/agent-worktrees/${encodeURIComponent(agentId)}`;
 }

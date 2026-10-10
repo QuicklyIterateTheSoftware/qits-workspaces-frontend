@@ -1,7 +1,7 @@
 import type { CanMatchFn, Routes } from '@angular/router';
 import { QITS_CATEGORIES, QitsMainLayout, type QitsCategory } from '@qits/ui-components';
+import { AgentPage } from './detail/agent-page';
 import { WorkspaceDetailPage } from './detail/workspace-detail-page';
-import { EditorPage } from './editor/editor-page';
 import { NotFound } from './not-found/not-found';
 import { WorkspacesPage } from './overview/workspaces-page';
 import { RunnersPage } from './runners/runners-page';
@@ -9,24 +9,18 @@ import { RunnersPage } from './runners/runners-page';
 /**
  * The pages this application owns.
  *
- * **The root view is intentionally small.** It lists the active workspaces of whatever repository
- * is in scope and offers the create flow. Unscoped it falls back to a picker, one wrapper per
+ * **The root view is intentionally small.** It lists the workspaces and agents of whatever wrapper
+ * is in scope and offers the new-agent form. Unscoped it falls back to a picker, one wrapper per
  * project — the row qits-projects names as the wrapper — and `?repository=<id>` preselects one.
  *
- * **The detail route names a repository and then a workspace**, and the repository segment is not
- * decoration: qits-workspaces' listing takes a mandatory `repositoryId` and answers 404 without one,
- * so a detail page that could not name its repository could not read its own header. The workspace
- * id is the generated one every route addresses, never the branch-derived label — the label is
- * unique only among active workspaces in one repository and is reusable once one resolves.
+ * **The workspace route names a repository and then a workspace.** The workspace id is the
+ * generated row id, never the label. The repository segment says which wrapper the reader came
+ * through and keeps old links working.
  *
- * **`editor` names nothing but itself**, which is why it is a bare literal beside the other two
- * rather than a segment under a repository. There is one editor for the whole platform — a single
- * container holding every project's wrapper side by side — so the page needs no scope to have a
- * subject, and `/editor` is the plain address of it. A project in front, `/qits/editor`, is a
- * convenience and not a second subject: it opens the same editor at that project's folder, and a
- * repository segment on top of that would be a third answer to a question the project already
- * settled. The literal joins the closed vocabulary of first segments below, so no project may be
- * called `editor`, exactly as none may be called `repositories`.
+ * **`agents/:agentId` is one agent** (qits-1152): a work item's coding agent, with Chat, Files and
+ * Terminal. It sits beside the workspace route rather than under it, because a queued agent has no
+ * workspace yet and an agent's id is unique on its own. `agents` joins the closed vocabulary of
+ * first segments below, so no project may be called `agents`.
  *
  * **`runners` is the same kind of literal.** A workspace runner is infrastructure the whole estate
  * shares, so the page has no subject but itself and answers at every spelling only so the chrome
@@ -34,15 +28,15 @@ import { RunnersPage } from './runners/runners-page';
  * called `runners`.
  *
  * **Which tab is open rides in `?tab=`, not in a trailing segment.** A trailing segment would make a
- * tab switch free (Angular reuses a component across a parameter change) and would make a *workspace*
+ * tab switch free (Angular reuses a component across a parameter change) and would make an *agent*
  * switch free too — which is the bug, not the feature. Keeping the tab in the query string leaves the
- * path meaning "which workspace", makes a bare URL mean "no tab pinned" by simple absence, and keeps
+ * path meaning "which agent", makes a bare URL mean "no tab pinned" by simple absence, and keeps
  * every tab a shareable link.
  */
 const own: Routes = [
   { path: '', component: WorkspacesPage },
-  { path: 'editor', component: EditorPage },
   { path: 'runners', component: RunnersPage },
+  { path: 'agents/:agentId', component: AgentPage },
   {
     path: 'repositories/:repositoryId/workspaces/:workspaceId',
     component: WorkspaceDetailPage,

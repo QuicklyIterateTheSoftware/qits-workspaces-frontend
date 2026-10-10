@@ -3,21 +3,8 @@ import { QitsButton } from '@qits/ui-components';
 import { AgentSignIn } from './agent-sign-in';
 
 /**
- * "Nobody is signed in", said plainly, with the sign-in terminal offered as the next step.
- *
- * **The point is the press.** The refusal and the door are two different things and this draws them
- * as two: a sentence naming the harness nobody has signed in, and a button that opens the terminal
- * where somebody can. What it replaces did neither — the launch quietly *became* the terminal and the
- * caller attached to it, so the only way to find out you had not started a session was to look at
- * what was on the screen and recognise a login prompt.
- *
- * Rendered by both surfaces that launch, because both meet the same wall: one sign-in serves the
- * whole shared credential volume, so being signed out is a fact about the container rather than about
- * the tab you pressed in.
- *
- * The terminal itself is the Agents tab's, which owns this page's one PTY. So the press has two
- * halves — open the command, then show where it is — and the second half is the caller's: the Agents
- * tab is already there, and the Chat tab jumps. {@link opened} is that seam.
+ * "Nobody is signed in", said plainly, with the sign-in terminal offered as the next step. The
+ * Terminal tab draws the terminal once it is open.
  */
 @Component({
   selector: 'app-sign-in-notice',
@@ -28,17 +15,12 @@ import { AgentSignIn } from './agent-sign-in';
       <div class="signed-out" role="alert">
         <p class="said">{{ refusal.message }}</p>
         <p class="note">
-          The sign-in writes to the shared agent home, so completing it once signs every workspace on
-          this platform in. Nothing is relaunched when it closes — start the session again yourself,
-          so a sign-in that did not take cannot become a launch loop.
+          The sign-in writes to the shared agent home, so completing it once signs every workspace
+          on this platform in. The service starts the agent again on its own afterwards.
         </p>
-        <qits-button
-          variant="primary"
-          size="sm"
-          [busy]="signIn.busy()"
-          (pressed)="press()"
-          >{{ label() }}</qits-button
-        >
+        <qits-button variant="primary" size="sm" [busy]="signIn.busy()" (pressed)="press()">{{
+          label()
+        }}</qits-button>
       </div>
     }
 
@@ -84,12 +66,7 @@ export class SignInNotice {
   /** Which workspace's container the terminal is opened in. */
   readonly workspaceRowId = input.required<number>();
 
-  /**
-   * The terminal is open, or already was — go and show it.
-   *
-   * Emitted after the launch has answered, never before: a jump to a tab that has nothing to render
-   * yet is the same "something happened, somewhere" the substitution used to be.
-   */
+  /** The terminal is open. */
   readonly opened = output<void>();
 
   /** A terminal already on screen is shown, not launched again: the volume needs one OAuth. */

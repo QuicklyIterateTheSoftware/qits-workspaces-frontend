@@ -10,22 +10,21 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import {
-  QITS_REPOSITORIES,
-  QITS_SCOPE,
-  QitsAppLinks,
-  scopeCommands,
-} from '@qits/ui-components';
-import type { ProjectDto, RepositoryDto, WorkspaceDto } from '../api/dto';
+import { QITS_REPOSITORIES, QITS_SCOPE, QitsAppLinks, scopeCommands } from '@qits/ui-components';
+import type {
+  AgentDto,
+  AgentHarness,
+  ProjectDto,
+  RepositoryDto,
+  WorkItemDto,
+  WorkspaceDto,
+} from '../api/dto';
 import { ProjectsApi } from '../api/projects-api';
+import { WorkspaceAgentsApi } from '../api/workspace-agents-api';
 import { WorkspacesApi } from '../api/workspaces-api';
+import { runStateLabel } from '../detail/agent-labels';
 import { serverMessage } from '../ui/loadable';
-import {
-  workspaceSubject,
-  workspaceSubjectLabel,
-  workspaceSubjectPath,
-  type WorkspaceSubject,
-} from '../ui/workspace-subject';
+import { agentLabel, workItemLink } from '../ui/work-item';
 
 /** One project's wrapper repository, named as the picker shows it. */
 interface Choice {
@@ -34,45 +33,19 @@ interface Choice {
 }
 
 /**
- * The root view: the aggregate workspaces that exist, and the one form that makes another.
+ * The root view: a wrapper's workspaces and agents, and the form that makes a new agent.
  *
- * **The address picks the repository when it names one.** `/qits/services/qits-ci/` is a request for
- * that repository's workspaces, and `/qits/…` with no repository resolved is a request for the
- * project's wrapper — the repository an aggregate workspace actually branches. In both cases the
- * picker is not drawn: it would be a control offering to contradict the URL.
+ * **The address picks the wrapper when it names one.** A scoped address names a repository, or a
+ * project whose wrapper is meant; the picker is not drawn then. Unscoped, the picker offers every
+ * project's wrapper, and `?repository=<id>` preselects one.
  *
- * **Unscoped, the picker is still the way in.** Every project's wrapper is offered, and only its
- * wrapper. An aggregate workspace branches a
- * wrapper and every registered submodule under it, so an ordinary component repository would offer
- * a create the service refuses. The rule is the service's own answer and not a derivation of it:
- * the repositories read carries a `wrapper` view whose `repositoryId` names the row, and this page
- * admits that row. It used to filter on the literal name `qits-qits`, which offered the platform's
- * own wrapper and no other project's.
+ * **A person creates an agent for an existing work item, never a free goal (D24).** The form takes
+ * a ticket or epic, by qualified id (`qits-617`) or UUID, reads it from qits-projects to send its
+ * UUID, qualified id and kind, and posts `POST /workspaces/api/agents`. The service places the agent
+ * in a workspace (making one if a runner has room) and starts it; the page then opens the agent.
  *
- * **`?repository=<id>` preselects one.** The projects SPA links here from a project's own page, and
- * an id naming no admitted wrapper is ignored — a stale link lands on the ordinary first choice
- * rather than on an empty picker.
- *
- * **The list needs a repository before it can be read.** qits-workspaces' listing takes a mandatory
- * `repositoryId`, so with no choice admitted there is nothing to ask for and the page shows an empty
- * list rather than a failed request.
- *
- * **"Enable docker socket" is admin mode, and it is per workspace.** Ticked, the create asks
- * qits-workspaces for a workspace whose container holds the host's docker socket — which makes that
- * container root-equivalent on the host — so administration can be done from inside a workspace. It
- * starts unticked on every press, is never remembered, and the list marks the workspaces that hold
- * it: a privilege nobody can see is one nobody gives back.
- *
- * **Every regular workspace lands on a workspace runner's node, not the platform host.** The service
- * decides that unconditionally now: the create request has no say in it, and asking for `DIRECT`
- * on a regular workspace is refused with a 400, same as asking for `RUNNER` on an admin one. Admin
- * mode and the one shared editor are the only rows that still run `DIRECT`. The list marks every
- * runner-placed row with its runner.
- *
- * **Create is three steps in a fixed order**: the service forks the branch tree, the container is
- * then asked to start, and only then does the page navigate to the detail view — which is where the
- * starting process is actually watched. Navigating first would leave the container unstarted if the
- * second request never went out.
+ * **"Enable docker socket" is admin mode, per agent.** An admin agent runs only in an admin
+ * workspace, whose container holds the host's docker socket. It starts unticked on every press.
  */
 @Component({
   selector: 'app-workspaces-page',
@@ -84,6 +57,7 @@ interface Choice {
 export class WorkspacesPage implements OnInit {
   private readonly projectsApi = inject(ProjectsApi);
   private readonly workspacesApi = inject(WorkspacesApi);
+  private readonly agentsApi = inject(WorkspaceAgentsApi);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly qitsScope = inject(QITS_SCOPE);
@@ -94,23 +68,30 @@ export class WorkspacesPage implements OnInit {
 
   /**
    * Every repository row this page has seen, by id. The picker offers wrappers alone, but a scoped
-   * address can name any repository, and a create needs that row's main branch to fork from.
+   * address can name any repository, and a create needs that row and its project.
    */
   protected readonly rows = signal<ReadonlyMap<string, RepositoryDto>>(new Map());
   protected readonly workspaces = signal<readonly WorkspaceDto[]>([]);
+  protected readonly agents = signal<readonly AgentDto[]>([]);
   protected readonly loading = signal(true);
   protected readonly creating = signal(false);
   protected readonly error = signal<string | null>(null);
-  protected branch = 'adhoc-changes';
   protected selectedRepositoryId = '';
 
+  /** The work item, as typed: a qualified id (`qits-617`) or a UUID. */
+  protected workItem = '';
+
+  /** The harness; empty takes the service's default. */
+  protected harness: AgentHarness | '' = '';
+
+  /** The agent's first turn, optional. */
+  protected instruction = '';
+
+  protected readonly harnesses: readonly AgentHarness[] = ['CLAUDE', 'KIMI'];
+
   /**
-   * The admin-mode checkbox: create this workspace with the host's docker socket mounted.
-   *
-   * **It resets to false and is never remembered.** A container holding that socket is
-   * root-equivalent on the host, so the answer has to be given per workspace rather than inherited
-   * from the last one somebody made — a sticky preference here would grant the socket to workspaces
-   * nobody thought about.
+   * The admin-mode checkbox. It resets to false after every create and is never remembered: an
+   * admin agent's container is root-equivalent on the host.
    */
   protected admin = false;
 
@@ -132,41 +113,25 @@ export class WorkspacesPage implements OnInit {
       : this.qitsRepositories.wrapperRepositoryId();
   });
 
-  /**
-   * What a row is for, where a dispatch said so — the reference that makes a list of branch names
-   * answer "what is this workspace about" without opening one. `null` for a hand-made workspace.
-   */
-  protected subjectOf(workspace: WorkspaceDto): WorkspaceSubject | null {
-    return workspaceSubject(workspace);
+  protected labelOf(agent: AgentDto): string {
+    return agentLabel(agent);
   }
 
-  /** How the reference reads. */
-  protected labelOf(subject: WorkspaceSubject): string {
-    return workspaceSubjectLabel(subject);
+  protected runStateOf(agent: AgentDto): string {
+    return runStateLabel(agent);
   }
 
-  /**
-   * Where the reference points, or `undefined` when this page cannot honestly spell the address —
-   * the platform has stated no origin for qits-projects yet, no project is on screen, or the branch
-   * spells no slug. The label is rendered either way.
-   *
-   * <p>The project comes from the address when there is one and from the picked repository's project
-   * otherwise, because the unscoped form is a picker over every project's wrapper and the rows below
-   * it belong to whichever one is selected.
-   */
-  protected subjectHrefOf(subject: WorkspaceSubject): string | undefined {
-    const project = this.qitsScope.scope().project ?? this.selectedProjectSlug();
-    if (!project) {
-      return undefined;
-    }
-    const path = workspaceSubjectPath(subject);
-    return path ? this.appLinks.href('qits-projects', path, { project }) : undefined;
+  /** The agent's work item in qits-projects, or undefined when no address can be spelled. */
+  protected workItemHrefOf(agent: AgentDto): string | undefined {
+    const link = workItemLink(agent);
+    return link
+      ? this.appLinks.href('qits-projects', link.path, { project: link.project })
+      : undefined;
   }
 
-  /** The picked repository's project, for the unscoped form. */
-  private selectedProjectSlug(): string | undefined {
-    return this.choices().find((choice) => choice.repository.id === this.selectedRepositoryId)
-      ?.project.slug;
+  /** How many agents a workspace hosts, from the agent list on hand. */
+  protected agentCount(workspace: WorkspaceDto): number {
+    return this.agents().filter((agent) => agent.workspaceRowId === workspace.id).length;
   }
 
   /** Whether the address states a project. It is what hides the picker. */
@@ -238,53 +203,69 @@ export class WorkspacesPage implements OnInit {
     }
   }
 
+  /**
+   * Create an agent for the typed work item.
+   *
+   * The item is read first: only a ticket or an epic of the wrapper's own project gets an agent, and
+   * the service does not check that itself.
+   */
   protected async create(): Promise<void> {
-    // The row rather than the picker's choice: a scoped address can name a repository the picker
-    // does not offer, and what a create needs from it is the branch to fork.
     const repository = this.rows().get(this.selectedRepositoryId);
-    const branch = this.branch.trim();
-    if (!repository || !branch || this.creating()) return;
-    // The service accepts `[A-Za-z0-9_-]{1,64}` as a workspace id and refuses anything else with a
-    // 400, so a branch name that carries no such character has no id to send at all.
-    const id = this.slug(branch);
-    if (!id) {
-      this.error.set('The branch name needs a letter or a number.');
-      return;
-    }
+    const ref = this.workItem.trim();
+    if (!repository || !ref || this.creating()) return;
     this.creating.set(true);
     this.error.set(null);
     try {
-      const created = await this.workspacesApi.createWorkspace({
+      let item: WorkItemDto;
+      try {
+        item = await this.projectsApi.workItem(ref);
+      } catch (failure) {
+        const status = failure instanceof HttpErrorResponse ? failure.status : 0;
+        this.error.set(
+          status === 404
+            ? `There is no work item ${ref}.`
+            : this.message(failure, `Could not read the work item ${ref}.`),
+        );
+        return;
+      }
+      const refusal = this.refuse(item, repository);
+      if (refusal) {
+        this.error.set(refusal);
+        return;
+      }
+      const harness = this.harness || undefined;
+      const instruction = this.instruction.trim() || undefined;
+      const answer = await this.agentsApi.create({
         repositoryId: repository.id,
-        id,
-        parent: repository.mainBranch,
-        branch,
-        preamble: '',
-        adoptExisting: false,
-        branchTree: true,
-        // The posture, as the checkbox stands at the moment of the press. Sent explicitly rather
-        // than omitted-when-false so the request says what was asked for either way; the service
-        // reads a missing field as no, which is what every other caller relies on.
+        workId: item.id,
+        entityId: item.qualifiedId,
+        kind: item.archetype === 'EPIC' ? 'EPIC' : 'TICKET',
+        // The posture as the checkbox stands at the press, sent either way.
         admin: this.admin,
+        ...(harness ? { harness } : {}),
+        ...(instruction ? { instruction } : {}),
       });
-      // No second call: creating a workspace starts it (qits-853) — a DIRECT row's container is
-      // already coming up, and a RUNNER row is already queued for a runner. The detail page finds
-      // the running start through its own active-process read.
-      await this.router.navigate([
-        ...this.home(),
-        'repositories',
-        repository.id,
-        'workspaces',
-        created.id,
-      ]);
+      this.admin = false;
+      this.workItem = '';
+      this.instruction = '';
+      await this.router.navigate([...this.home(), 'agents', answer.agent.agentId]);
     } catch (failure) {
-      this.error.set(this.message(failure, 'Could not create the workspace.'));
-      // The list is re-read because a 409 usually means the workspace is already there. A failure
-      // of that read must not overwrite the message that explains the press.
+      this.error.set(this.message(failure, 'Could not create the agent.'));
       await this.reload().catch(() => undefined);
     } finally {
       this.creating.set(false);
     }
+  }
+
+  /** Why this item cannot get an agent here, or null when it can. */
+  private refuse(item: WorkItemDto, repository: RepositoryDto): string | null {
+    if (item.archetype !== 'TICKET' && item.archetype !== 'EPIC') {
+      return `${item.qualifiedId} is a ${item.archetype.toLowerCase()}. Only a ticket or an epic gets an agent.`;
+    }
+    if (repository.projectId && item.projectId && repository.projectId !== item.projectId) {
+      return `${item.qualifiedId} belongs to another project than this wrapper.`;
+    }
+    return null;
   }
 
   /**
@@ -299,20 +280,24 @@ export class WorkspacesPage implements OnInit {
     return choices.some((choice) => choice.repository.id === asked) ? asked : null;
   }
 
+  /** The wrapper's workspaces, and the agents working on it (every state but removed). */
   private async reload(): Promise<void> {
-    this.listed = this.selectedRepositoryId;
-    if (!this.selectedRepositoryId) {
+    const repositoryId = this.selectedRepositoryId;
+    this.listed = repositoryId;
+    if (!repositoryId) {
       this.workspaces.set([]);
+      this.agents.set([]);
       return;
     }
-    this.workspaces.set(await this.workspacesApi.workspaces(this.selectedRepositoryId));
-  }
-
-  private slug(branch: string): string {
-    return branch
-      .replace(/[^A-Za-z0-9_-]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 64);
+    const [workspaces, agents] = await Promise.all([
+      this.workspacesApi.workspaces(repositoryId),
+      this.agentsApi.agents(),
+    ]);
+    if (this.selectedRepositoryId !== repositoryId) return;
+    this.workspaces.set(workspaces);
+    this.agents.set(
+      agents.filter((agent) => agent.repositoryId === repositoryId && agent.state !== 'REMOVED'),
+    );
   }
 
   /** The service's own words when it sent any, and this page's sentence when it did not. */

@@ -4,12 +4,11 @@ import { firstValueFrom } from 'rxjs';
 import { QITS_API_BASE } from './api-base';
 
 /**
- * The workspace's prompt draft, on the **host** rather than the daemon.
+ * An agent's prompt draft, on the **host** rather than the daemon (`/workspaces/api/agents/{id}/…`).
  *
- * It is host-owned for a reason worth keeping straight: the draft is *work product*, and it must
- * outlive the container it was composed for. A recreate throws the daemon's in-memory world away;
- * the half-written prompt has to still be there afterwards. That is also the asymmetry with tab
- * order, which is device ergonomics and lives in the browser.
+ * The draft is work product and must outlive the container: a recreate throws the daemon's memory
+ * away, the half-written prompt stays. Tab order, by contrast, is device ergonomics and lives in the
+ * browser.
  */
 
 /**
@@ -52,14 +51,12 @@ export class PromptDraftApi {
    * screens. A 404 is therefore translated rather than thrown — every other failure is not, because
    * a 503 that read as "no draft" would quietly offer a blank box over work that still exists.
    *
-   * The host answers 404 for "no such ACTIVE workspace" too, and the two are indistinguishable by
-   * status. Both read as "no draft" here, which is the smaller of the two readings and costs
-   * nothing: the shell has already decided whether this workspace exists, and a prompt panel is not
-   * drawn for one that does not.
+   * The host answers 404 for "no such agent" too. Both read as "no draft" here: the page has already
+   * decided whether the agent exists.
    */
-  async draft(workspaceRowId: number): Promise<PromptDraftDto | null> {
+  async draft(agentId: string): Promise<PromptDraftDto | null> {
     try {
-      const answer = await firstValueFrom(this.http.get<DraftResponse>(this.url(workspaceRowId)));
+      const answer = await firstValueFrom(this.http.get<DraftResponse>(this.url(agentId)));
       return answer.draft ?? null;
     } catch (error) {
       if (isNotFound(error)) {
@@ -75,26 +72,22 @@ export class PromptDraftApi {
    * The answer is used rather than discarded: the caller needs the DB-assigned `updatedAt` to
    * recognise its own echo on the `prompt-draft` hint. A 400 means `content` is not well-formed
    * JSON, a 413 means the two fields together exceed the 2 MB cap, and a 404 means there is no such
-   * ACTIVE workspace.
+   * agent.
    */
-  async save(
-    workspaceRowId: number,
-    content: string,
-    serializedPrompt: string,
-  ): Promise<PromptDraftDto> {
+  async save(agentId: string, content: string, serializedPrompt: string): Promise<PromptDraftDto> {
     const answer = await firstValueFrom(
-      this.http.put<DraftResponse>(this.url(workspaceRowId), { content, serializedPrompt }),
+      this.http.put<DraftResponse>(this.url(agentId), { content, serializedPrompt }),
     );
     return answer.draft;
   }
 
   /** Throw the draft away. Answers 204 whether or not there was one, so this never 404s on absence. */
-  async discard(workspaceRowId: number): Promise<void> {
-    await firstValueFrom(this.http.delete<void>(this.url(workspaceRowId)));
+  async discard(agentId: string): Promise<void> {
+    await firstValueFrom(this.http.delete<void>(this.url(agentId)));
   }
 
-  private url(workspaceRowId: number): string {
-    return `${this.base}/workspaces/api/workspaces/${encodeURIComponent(workspaceRowId)}/prompt-draft`;
+  private url(agentId: string): string {
+    return `${this.base}/workspaces/api/agents/${encodeURIComponent(agentId)}/prompt-draft`;
   }
 }
 
