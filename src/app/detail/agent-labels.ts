@@ -7,7 +7,7 @@ export function runStateLabel(agent: Pick<AgentDto, 'runState'>): string {
     case 'RUNNING':
       return 'running';
     case 'YIELDED':
-      return 'yielded — waits for its turn';
+      return 'yielded — idle, terminal stays live';
     case 'QUEUED':
       return 'queued — no free slot yet';
     default:

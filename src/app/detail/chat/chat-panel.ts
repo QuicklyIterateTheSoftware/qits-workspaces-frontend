@@ -34,7 +34,7 @@ export const TRANSCRIPT_POLL_MS = 3000;
  *
  * The agent's harness is one command, named by the daemon's worktree read (`commandId`). While that
  * command is a running `CHAT`, this tab attaches to its socket and a typed turn goes down it. When it
- * is not — the agent yielded, is queued, or runs in a terminal — the prompt panel sends the turn
+ * is not — queued, or running in a terminal — the prompt panel sends the turn
  * through the service's delivery door, which resumes the agent to hear it (qits-1152).
  *
  * An agent in a terminal (the default) has its live screen on the Terminal tab. Here it shows its
