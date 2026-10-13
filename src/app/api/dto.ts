@@ -681,6 +681,16 @@ export interface AgentDto {
   readonly entityBlocked?: boolean | null;
   readonly activity?: AgentActivityState | null;
   readonly waitingSince?: string | null;
+  /**
+   * What the agent waits on: the labels of its open declared waits joined by `; `, null when none
+   * (qits-1229). Absent from a service older than that.
+   */
+  readonly waitingOn?: string | null;
+  /**
+   * When the oldest open declared wait was made: the wait's age clock, null when none. Not
+   * `waitingSince`, which is when the harness last said it awaits input — a different clock.
+   */
+  readonly waitingOnSince?: string | null;
   readonly lastActivityAt?: string | null;
   readonly createdAt?: string | null;
   readonly obsoleteAt?: string | null;
@@ -727,20 +737,6 @@ export interface AgentDeliveryDto {
   readonly launched: boolean;
   readonly resumed: boolean;
   readonly detail?: string | null;
-}
-
-/** A declared wait's state (qits-1153). */
-export type AgentWaitState = 'OPEN' | 'MATCHED' | 'TIMED_OUT' | 'CANCELLED';
-
-/** What an agent waits on (qits-1153). Only what this page shows is typed. */
-export interface AgentWaitDto {
-  readonly id: string;
-  readonly agentId: string;
-  readonly label?: string | null;
-  readonly selection?: { readonly event?: string } | null;
-  readonly state: AgentWaitState;
-  readonly createdAt?: string | null;
-  readonly expiresAt?: string | null;
 }
 
 /** The work item kinds qits-projects knows. Only tickets and epics get an agent. */

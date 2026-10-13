@@ -19,7 +19,7 @@ import {
   scopeCommands,
 } from '@qits/ui-components';
 import { AgentWorktreesApi, type AgentWorktreeDto } from '../api/agent-worktrees-api';
-import type { AgentDto, AgentWaitDto } from '../api/dto';
+import type { AgentDto } from '../api/dto';
 import { WorkspaceAgentsApi } from '../api/workspace-agents-api';
 import { WorkspaceCommands } from '../api/workspace-commands';
 import { WorkspaceDaemonApi } from '../api/workspace-daemon-api';
@@ -35,7 +35,7 @@ import {
   type Loadable,
 } from '../ui/loadable';
 import { agentLabel, workItemLink } from '../ui/work-item';
-import { activityLabel, agentStateTone, runStateLabel } from './agent-labels';
+import { activityLabel, agentStateTone, agentWaitLabel, runStateLabel } from './agent-labels';
 import { ChatPanel } from './chat/chat-panel';
 import { FilesPanel } from './files/files-panel';
 import { TabHost } from './tabs/tab-host';
@@ -65,11 +65,6 @@ export function discardRefusal(error: unknown): DiscardRefusal | null {
   return { code, message: serverMessage(error.error) ?? 'The service refused the discard.' };
 }
 
-/** What a wait reads as: its label, else the event it waits for. */
-export function waitLabel(wait: AgentWaitDto): string {
-  return wait.label?.trim() || wait.selection?.event?.trim() || 'an event';
-}
-
 /**
  * One agent: a work item's coding agent and its worktree (qits-1152, D12).
  *
@@ -78,8 +73,8 @@ export function waitLabel(wait: AgentWaitDto): string {
  *
  * **Reads:** the agent (`GET /workspaces/api/agents/{id}`), its worktree from the workspace daemon
  * (`GET …/container/{rowId}/agent-worktrees/{id}`, for the harness command id and the dirty and
- * unpushed flags), its open waits where the service has them (qits-1153), and its workspace's hint
- * channel. A queued agent has no workspace and so no channel; it is read again every
+ * unpushed flags) and its workspace's hint channel. What the agent waits on comes with the agent
+ * (`waitingOn`, `waitingOnSince`, qits-1229). A queued agent has no workspace and so no channel; it is read again every
  * {@link QUEUED_POLL_MS} until it is placed.
  *
  * `/agents/{agentId}?tab=…`: the tab is a query parameter, so a tab switch keeps the page and an
@@ -128,7 +123,6 @@ export class AgentPage {
 
   protected readonly agentState = signal<Loadable<AgentDto>>(LOADING);
   protected readonly worktree = signal<Loadable<AgentWorktreeDto | null>>(IDLE);
-  protected readonly waits = signal<readonly AgentWaitDto[]>([]);
 
   protected readonly discardStep = signal<DiscardStep>('closed');
   protected readonly discarding = signal(false);
@@ -168,12 +162,6 @@ export class AgentPage {
       const agentId = this.agentId();
       this.worktreeHints();
       untracked(() => void this.loadWorktree(rowId, agentId));
-    });
-
-    effect(() => {
-      const agentId = this.agentId();
-      this.agentHints();
-      untracked(() => void this.loadWaits(agentId));
     });
 
     effect(() => {
@@ -239,7 +227,16 @@ export class AgentPage {
     return agent ? runStateLabel(agent) : '';
   });
 
-  protected readonly activity = computed(() => activityLabel(this.agent()?.activity ?? null));
+  protected readonly activity = computed(() => {
+    const agent = this.agent();
+    return activityLabel(agent?.activity ?? null, agent?.waitingOn);
+  });
+
+  /** What the agent waits on and for how long, or null when it declares no wait (qits-1229). */
+  protected readonly wait = computed(() => {
+    const agent = this.agent();
+    return agent ? agentWaitLabel(agent) : null;
+  });
 
   protected readonly stateTone = computed(() => agentStateTone(this.agent()?.state ?? 'REMOVED'));
 
@@ -266,8 +263,6 @@ export class AgentPage {
 
   protected readonly commandId = computed(() => this.worktreeValue()?.commandId ?? null);
 
-  protected readonly waitLabels = computed(() => this.waits().map(waitLabel));
-
   /** What the work is about, for the prompt rewrite: the item's id and title. */
   protected readonly preamble = computed(() => {
     const agent = this.agent();
@@ -291,16 +286,24 @@ export class AgentPage {
     return isDurableTab(slug) ? slug! : this.defaultTab();
   });
 
-  /** The tab row, with a dot on Chat while the agent works or waits on you. */
+  /**
+   * The tab row, with a dot on Chat while the agent works or waits on you. An agent that declared
+   * what it waits on is not waiting on you: it gets no dot, and the header names the wait.
+   */
   protected readonly tabs = computed<readonly TabDef[]>(() => {
-    const activity = this.agent()?.activity ?? null;
+    const agent = this.agent();
+    const activity = agent?.activity ?? null;
     return DURABLE_TABS.map((tab) => {
-      if (tab.slug !== 'chat' || (activity !== 'BUSY' && activity !== 'WAITING')) {
+      if (tab.slug !== 'chat') {
         return tab;
       }
-      return activity === 'BUSY'
-        ? { ...tab, dot: 'accent' as const, dotTitle: 'The agent is working' }
-        : { ...tab, dot: 'warning' as const, dotTitle: 'The agent waits on you' };
+      if (activity === 'BUSY') {
+        return { ...tab, dot: 'accent' as const, dotTitle: 'The agent is working' };
+      }
+      if (activity === 'WAITING' && !agent?.waitingOn?.trim()) {
+        return { ...tab, dot: 'warning' as const, dotTitle: 'The agent waits on you' };
+      }
+      return tab;
     });
   });
 
@@ -342,21 +345,6 @@ export class AgentPage {
       this.worktree.set(
         error instanceof HttpErrorResponse && error.status === 404 ? ready(null) : failed(error),
       );
-    }
-  }
-
-  /** Open waits are shown when the service has them, and never block the page. */
-  private async loadWaits(agentId: string): Promise<void> {
-    if (!agentId) {
-      return;
-    }
-    try {
-      const waits = await this.agentsApi.openWaits(agentId);
-      if (this.agentId() === agentId) {
-        this.waits.set(waits);
-      }
-    } catch {
-      // Waits are an extra; a failed read leaves what was shown.
     }
   }
 

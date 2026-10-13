@@ -28,7 +28,7 @@ import { Empty } from '../ui/empty';
 import { NONE } from '../ui/format';
 import { IDLE, LOADING, failed, ready, type Loadable } from '../ui/loadable';
 import { agentLabel, workItemLink } from '../ui/work-item';
-import { activityLabel, agentStateTone, runStateLabel } from './agent-labels';
+import { activityLabel, agentStateTone, agentWaitLabel, runStateLabel } from './agent-labels';
 import { EMPTY_CONVERSATION, buildConversation } from './chat/chat-model';
 import { Conversation } from './chat/conversation';
 import { StartingPanel } from './starting/starting-panel';
@@ -233,7 +233,12 @@ export class WorkspaceDetailPage {
   }
 
   protected activity(agent: AgentDto): string | null {
-    return activityLabel(agent.activity ?? null);
+    return activityLabel(agent.activity ?? null, agent.waitingOn);
+  }
+
+  /** What the agent waits on and for how long, or null when it declares no wait. */
+  protected waitOf(agent: AgentDto): string | null {
+    return agentWaitLabel(agent);
   }
 
   protected stateTone(agent: AgentDto) {

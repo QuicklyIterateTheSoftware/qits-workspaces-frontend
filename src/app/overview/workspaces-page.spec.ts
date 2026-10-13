@@ -237,6 +237,28 @@ describe('WorkspacesPage', () => {
     expect(link).not.toBeNull();
   });
 
+  it('puts what an agent waits on under its state line, and leaves an agent without one alone', async () => {
+    const since = new Date(Date.now() - 4 * 60_000 - 5_000).toISOString();
+    const component = await open({
+      agents: [
+        agent('a1', {
+          waitingOn: 'qits-platform-access-cli-rr-89 (qits-1213)',
+          waitingOnSince: since,
+        }),
+        agent('a2', { entityId: 'qits-618' }),
+      ],
+    });
+
+    const host = component.nativeElement as HTMLElement;
+    const waiting = host.querySelector('a[href="/agents/a1"] .waiting');
+    expect(waiting?.textContent?.trim()).toBe(
+      'waiting on qits-platform-access-cli-rr-89 (qits-1213) · 4m ago',
+    );
+    expect(host.querySelector('a[href="/agents/a2"] .waiting')).toBeNull();
+    expect(host.querySelector('a[href="/agents/a2"] .state-lines')).toBeNull();
+    expect(text(component)).not.toContain('waiting on you');
+  });
+
   it('offers one wrapper per project, named after the project', async () => {
     const widgets = project('p2', 'Widgets');
     const component = await open({

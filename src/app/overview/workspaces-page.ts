@@ -22,7 +22,7 @@ import type {
 import { ProjectsApi } from '../api/projects-api';
 import { WorkspaceAgentsApi } from '../api/workspace-agents-api';
 import { WorkspacesApi } from '../api/workspaces-api';
-import { runStateLabel } from '../detail/agent-labels';
+import { agentWaitLabel, runStateLabel } from '../detail/agent-labels';
 import { serverMessage } from '../ui/loadable';
 import { agentLabel, workItemLink } from '../ui/work-item';
 
@@ -119,6 +119,11 @@ export class WorkspacesPage implements OnInit {
 
   protected runStateOf(agent: AgentDto): string {
     return runStateLabel(agent);
+  }
+
+  /** What the agent waits on and for how long, or null when it declares no wait. */
+  protected waitOf(agent: AgentDto): string | null {
+    return agentWaitLabel(agent);
   }
 
   /** The agent's work item in qits-projects, or undefined when no address can be spelled. */

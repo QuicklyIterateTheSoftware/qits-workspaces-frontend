@@ -19,8 +19,9 @@ removes workspaces as agents need them.
   state, run state, activity, work item and branches. A workspace that has resolved shows its
   history record and archived agent sessions.
 - **`/agents/{agentId}?tab=chat|files|terminal`** — one agent: its work item (linked into
-  qits-projects), state, run state, activity, open waits ("Waiting on …", qits-1153, shown when the
-  service has them), branches, the worktree's dirty and unpushed flags, and **Discard**. Three tabs;
+  qits-projects), state, run state, activity, what it waits on (`waiting on … · 4m ago`, from the
+  agent's `waitingOn` and `waitingOnSince`, qits-1229; also on the agent rows of `/` and the
+  workspace page), branches, the worktree's dirty and unpushed flags, and **Discard**. Three tabs;
   with no `?tab`, Terminal, unless the agent's harness is a chat:
   - **Chat** — attaches to the agent's harness command when it is a running chat. An agent in a
     terminal (the default) shows its transcript here, read-only, from

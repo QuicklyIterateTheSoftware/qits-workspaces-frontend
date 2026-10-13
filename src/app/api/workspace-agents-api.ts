@@ -7,7 +7,6 @@ import type {
   AgentDispatchDto,
   AgentDto,
   AgentState,
-  AgentWaitDto,
   AgentsResponse,
   CreateAgentRequest,
 } from './dto';
@@ -88,37 +87,7 @@ export class WorkspaceAgentsApi {
     );
   }
 
-  /**
-   * The agent's open waits (qits-1153). A service without the door answers 404, which reads as
-   * "no waits" here: the page shows waits when there are any and says nothing otherwise.
-   */
-  async openWaits(agentId: string): Promise<readonly AgentWaitDto[]> {
-    try {
-      const answer = await firstValueFrom(
-        this.http.get<unknown>(`${this.url(agentId)}/waits`, {
-          params: new HttpParams().set('state', 'OPEN'),
-        }),
-      );
-      return waitsOf(answer).filter((wait) => wait.state === 'OPEN');
-    } catch (error) {
-      const status = (error as { status?: number } | null)?.status;
-      if (status === 404 || status === 405) {
-        return [];
-      }
-      throw error;
-    }
-  }
-
   private url(agentId: string): string {
     return `${this.base}/workspaces/api/agents/${encodeURIComponent(agentId)}`;
   }
-}
-
-/** The waits list, as a bare array or as `{waits: […]}`: the door is new and its envelope is not fixed. */
-function waitsOf(answer: unknown): readonly AgentWaitDto[] {
-  if (Array.isArray(answer)) {
-    return answer as AgentWaitDto[];
-  }
-  const waits = (answer as { waits?: unknown } | null)?.waits;
-  return Array.isArray(waits) ? (waits as AgentWaitDto[]) : [];
 }

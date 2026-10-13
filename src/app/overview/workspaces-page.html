@@ -95,7 +95,14 @@
                   docker socket
                 </span>
               }
-              <span>{{ agent.state.toLowerCase() }} · {{ runStateOf(agent) }}</span>
+              @if (waitOf(agent); as wait) {
+                <span class="state-lines">
+                  <span>{{ agent.state.toLowerCase() }} · {{ runStateOf(agent) }}</span>
+                  <span class="waiting">{{ wait }}</span>
+                </span>
+              } @else {
+                <span>{{ agent.state.toLowerCase() }} · {{ runStateOf(agent) }}</span>
+              }
             </a>
             <p class="subject">
               @if (agent.entityTitle) {

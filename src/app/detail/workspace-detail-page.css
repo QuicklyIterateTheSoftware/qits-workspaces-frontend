@@ -203,6 +203,13 @@ code {
   margin: 0;
 }
 
+/* What the agent waits on, under its facts line. */
+.waiting {
+  margin: 0.35rem 0 0;
+  color: #92400e;
+  font-size: 0.85rem;
+}
+
 .work-item {
   display: inline-block;
   margin-top: 0.35rem;

@@ -83,29 +83,4 @@ describe('WorkspaceAgentsApi', () => {
     request.flush({ agentId: 'a1', delivered: false, launched: false, resumed: true });
     expect((await sending).resumed).toBe(true);
   });
-
-  it('reads open waits from either envelope, and a missing door as none', async () => {
-    const bare = api.openWaits('a1');
-    http
-      .expectOne((candidate) => candidate.url === '/workspaces/api/agents/a1/waits')
-      .flush([{ id: 'w1', agentId: 'a1', label: 'release', state: 'OPEN' }]);
-    expect((await bare).map((wait) => wait.label)).toEqual(['release']);
-
-    const wrapped = api.openWaits('a1');
-    http
-      .expectOne((candidate) => candidate.url === '/workspaces/api/agents/a1/waits')
-      .flush({
-        waits: [
-          { id: 'w1', agentId: 'a1', state: 'OPEN' },
-          { id: 'w2', agentId: 'a1', state: 'MATCHED' },
-        ],
-      });
-    expect((await wrapped).map((wait) => wait.id)).toEqual(['w1']);
-
-    const missing = api.openWaits('a1');
-    http
-      .expectOne((candidate) => candidate.url === '/workspaces/api/agents/a1/waits')
-      .flush({ message: 'no' }, { status: 404, statusText: 'Not Found' });
-    expect(await missing).toEqual([]);
-  });
 });

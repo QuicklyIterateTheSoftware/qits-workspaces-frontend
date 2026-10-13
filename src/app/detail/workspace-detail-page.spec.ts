@@ -199,6 +199,27 @@ describe('WorkspaceDetailPage', () => {
     expect(rows[1].textContent).toContain('admin');
   });
 
+  it('says what an agent waits on and for how long, and not that it waits on you', async () => {
+    const since = new Date(Date.now() - 4 * 60_000 - 5_000).toISOString();
+    await open(undefined, workspace(7), [
+      agent('a1', {
+        activity: 'WAITING',
+        waitingOn: 'qits-platform-access-cli-rr-89 (qits-1213)',
+        waitingOnSince: since,
+      }),
+      agent('a2', { entityId: 'qits-618', activity: 'WAITING' }),
+    ]);
+
+    const rows = Array.from(element().querySelectorAll('.agent-list .agent'));
+    expect(rows[0].querySelector('.waiting')?.textContent?.trim()).toBe(
+      'waiting on qits-platform-access-cli-rr-89 (qits-1213) · 4m ago',
+    );
+    expect(rows[0].textContent).not.toContain('waiting on you');
+    // No declared wait: the row reads as it always did.
+    expect(rows[1].querySelector('.waiting')).toBeNull();
+    expect(rows[1].textContent).toContain('waiting on you');
+  });
+
   it('leaves removed agents out', async () => {
     await open(undefined, workspace(7), [agent('a1'), agent('a2', { state: 'REMOVED' })]);
     expect(element().querySelectorAll('.agent-list .agent')).toHaveLength(1);

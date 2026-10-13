@@ -88,6 +88,9 @@
                   <span>{{ agent.harness.toLowerCase() }}</span>
                 }
               </p>
+              @if (waitOf(agent); as wait) {
+                <p class="waiting">{{ wait }}</p>
+              }
               <p class="branches">
                 <code>{{ agent.wrapperBranch }}</code>
                 @for (branch of agent.branches; track branch.repositoryId + branch.branch) {

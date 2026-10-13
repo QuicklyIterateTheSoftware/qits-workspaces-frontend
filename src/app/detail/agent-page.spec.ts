@@ -169,14 +169,9 @@ describe('AgentPage', () => {
   }
 
   /** Open the page and answer its reads. */
-  async function open(
-    row: AgentDto = agent(),
-    waits: object = [],
-    worktree: object = WORKTREE,
-  ): Promise<void> {
+  async function open(row: AgentDto = agent(), worktree: object = WORKTREE): Promise<void> {
     await harness.navigateByUrl('/agents/a1');
     http.expectOne('/workspaces/api/agents/a1').flush(row);
-    http.expectOne((request) => request.url === '/workspaces/api/agents/a1/waits').flush(waits);
     await settle();
     if (row.workspaceRowId) {
       http.expectOne('/workspaces/container/7/agent-worktrees/a1').flush(worktree);
@@ -195,9 +190,11 @@ describe('AgentPage', () => {
     button.click();
   }
 
-  it('reads the agent, its waits and its worktree, and opens its workspace’s stream', async () => {
+  it('reads the agent and its worktree, and opens its workspace’s stream', async () => {
     await open();
     expect(streams.map((stream) => stream.url)).toEqual(['/workspaces/api/workspaces/7/events']);
+    // What the agent waits on comes with the agent (qits-1229): no separate waits read.
+    http.expectNone((request) => request.url.endsWith('/waits'));
     http.verify();
   });
 
@@ -226,7 +223,6 @@ describe('AgentPage', () => {
   it('opens on the Terminal tab, the live screen of an agent in a terminal', async () => {
     await harness.navigateByUrl('/agents/a1');
     http.expectOne('/workspaces/api/agents/a1').flush(agent());
-    http.expectOne((request) => request.url === '/workspaces/api/agents/a1/waits').flush([]);
     await settle();
     http.expectOne('/workspaces/container/7/agent-worktrees/a1').flush(WORKTREE);
     await settle();
@@ -238,7 +234,6 @@ describe('AgentPage', () => {
   it('opens on the Chat tab when the agent’s harness is a chat', async () => {
     await harness.navigateByUrl('/agents/a1');
     http.expectOne('/workspaces/api/agents/a1').flush(agent());
-    http.expectOne((request) => request.url === '/workspaces/api/agents/a1/waits').flush([]);
     await settle();
     http.expectOne('/workspaces/container/7/agent-worktrees/a1').flush(WORKTREE);
     await settle();
@@ -247,17 +242,41 @@ describe('AgentPage', () => {
     expect(element().querySelector('.strip .tab.active')?.textContent).toContain('Chat');
   });
 
-  it('shows what the agent waits on, when the service says (qits-1153)', async () => {
-    await open(agent({ activity: 'WAITING' }), {
-      waits: [{ id: 'w1', agentId: 'a1', label: 'release of qits-617', state: 'OPEN' }],
-    });
-    expect(text()).toContain('Waiting on release of qits-617');
+  it('shows what the agent waits on and for how long, and not that it waits on you', async () => {
+    const since = new Date(Date.now() - 4 * 60_000 - 5_000).toISOString();
+    await open(
+      agent({
+        activity: 'WAITING',
+        waitingOn: 'qits-platform-access-cli-rr-89 (qits-1213)',
+        waitingOnSince: since,
+        // The harness's own clock: never the wait's age.
+        waitingSince: '2020-01-01T00:00:00Z',
+      }),
+    );
+
+    const waiting = element().querySelectorAll('.waiting');
+    expect(waiting).toHaveLength(1);
+    expect(waiting[0].textContent?.trim()).toBe(
+      'waiting on qits-platform-access-cli-rr-89 (qits-1213) · 4m ago',
+    );
+    expect(text()).not.toContain('waiting on you');
+    expect(text()).not.toContain('waits on you');
+    expect(element().querySelector('.strip .tab .dot')).toBeNull();
+  });
+
+  it('says an agent with no declared wait waits on you, as before', async () => {
+    await open(agent({ activity: 'WAITING', waitingOn: null, waitingOnSince: null }));
+
+    expect(element().querySelector('.waiting')).toBeNull();
+    expect(text()).toContain('waiting on you');
+    expect(element().querySelector('.strip .tab .dot.warning')?.getAttribute('title')).toBe(
+      'The agent waits on you',
+    );
   });
 
   it('attaches the Chat tab to the agent’s own chat command', async () => {
     await harness.navigateByUrl('/agents/a1');
     http.expectOne('/workspaces/api/agents/a1').flush(agent());
-    http.expectOne((request) => request.url === '/workspaces/api/agents/a1/waits').flush([]);
     await settle();
     http.expectOne('/workspaces/container/7/agent-worktrees/a1').flush(WORKTREE);
     await settle();

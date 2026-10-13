@@ -37,8 +37,8 @@
         }
       </p>
 
-      @for (wait of waitLabels(); track $index) {
-        <p class="waiting" role="status">Waiting on {{ wait }}</p>
+      @if (wait(); as waiting) {
+        <p class="waiting" role="status">{{ waiting }}</p>
       }
 
       <p class="links">
